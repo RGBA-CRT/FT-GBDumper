@@ -1,0 +1,380 @@
+/* FT232HL GB Dumper
+ * connection:
+ *  後で書く
+ */
+
+'AB-FT232HLib
+#include "..\D2XX.sbp"
+#include "..\MCP23017_Lib.sbp"
+#include "..\FT232HLib_debug.sbp"
+'RGBALib
+#include <RGBALib.sbp>
+#include "ROM_Class.sbp"
+#console
+
+
+Type Align(1) DMG_ROM_HEADER 
+	EntryPoint AS DWord	'0100h
+	NLogo[47] AS Byte	'0104h
+	Title[14] AS Byte	'0134h
+	GBCFlag AS Byte		'0143h
+	MakerCode AS Word	'0144h
+	SGBFlag AS Byte		'146
+	CartType AS Byte		
+	RomSize AS Byte
+	SramSize AS Byte
+	RegionCode AS Byte
+	RomVersion AS Byte
+	HeaderComplement As Byte
+	CheckSum AS Byte
+End Type
+
+'Headerをわかりやすくした奴
+Type DMG_ROM_INFO
+	raw AS DMG_ROM_HEADER
+	bLogoCheck AS BOOL
+	Title[15] AS Byte
+	GameCode[4] AS Byte	'文字列扱い(Null終端)
+	ConsoleFlag AS Long
+	MBCType AS DMG_MBC_TYPE
+	RomSize AS DWord
+	SramSize AS DWord
+	RomVersion As DWord
+End Type
+
+Const DMG_NLOGO_SUM = &H1546
+
+Enum DMG_CONSOLE_FLAG
+	DMG_CF_NGB = &H01
+	DMG_CF_SGB = &H02
+	DMG_CF_GBC = &H04
+End Enum
+
+Enum DMG_MBC_TYPE
+	DMG_NO_MBC = 0
+	DMG_MBC1
+	DMG_MBC2
+	DMG_MBC3
+	DMG_MBC4
+	DMG_MBC5
+	DMG_MBC6
+	DMG_MBC7
+	DMG_MMM01
+	DMG_POCKET_CAMERA
+	DMG_TAMA5
+	DMG_HuC3
+	DMG_HuC1
+	DMG_MBC_TYPE_MAX
+	DMG_MBC_TYPE_UNKNOWN
+End Enum
+
+Dim DMG_MBC_TYPE_STR[DMG_MBC_TYPE_MAX+1] = [
+	"DMG_NO_MBC",
+	"DMG_MBC1",
+	"DMG_MBC2",
+	"DMG_MBC3",
+	"DMG_MBC4",
+	"DMG_MBC5",
+	"DMG_MBC6",
+	"DMG_MBC7",
+	"DMG_MMM01",
+	"DMG_POCKET_CAMERA",
+	"DMG_TAMA5",
+	"DMG_HuC3",
+	"DMG_HuC1",
+	"MBC BUG",
+	"MBC Unknown"
+] AS BytePtr
+
+Main()
+
+Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_INFO)
+	memcpy(VarPtr(info),VarPtr(rawHeader),sizeof(DMG_ROM_HEADER))
+
+	Dim i AS Long,sum AS DWord
+	For i=0 To 47
+		sum+=rawHeader.NLogo[i]
+	Next
+
+	if sum=DMG_NLOGO_SUM Then 
+		info.bLogoCheck=TRUE
+	Else
+		info.bLogoCheck=FALSE
+		printf("LogoCheck NG")
+	End If
+
+	memcpy(info.Title,rawHeader.Title,15)
+	info.Title[15]=0
+
+	'タイトルが16文字より少ない場合、ゲームIDがタイトルの後ろの方に書かれていることがある。
+	/*if info.Title[10]=&H00 Then	*/memcpy(info.GameCode,VarPtr(info.Title[11]),4)
+
+	If rawHeader.GBCFlag = &HC0 Then
+		info.ConsoleFlag = DMG_CF_GBC	'GBC専用
+	Else
+		info.ConsoleFlag = DMG_CF_NGB
+		if rawHeader.GBCFlag = &H80 Then	info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_GBC
+		if rawHeader.SGBFlag <> &H00 Then	info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_SGB
+	Endif
+
+	Dim ct AS Byte, mt AS DMG_MBC_TYPE
+	ct=rawHeader.CartType
+
+	if ct=0 or ct=8 or ct=09 Then 
+		mt=DMG_NO_MBC
+
+	Elseif ct >= &H01 And ct<=&H05 Then
+		mt=DMG_MBC1
+
+	Elseif ct >= &H0B And ct<=&H0B Then
+		mt=DMG_MMM01
+
+	Elseif ct >= &H0F And ct<=&H012 Then
+		mt=DMG_MBC3
+
+	Elseif ct >= &H19 And ct<=&H1E Then
+		mt=DMG_MBC5
+
+	Elseif ct = &H20 Then
+		mt=DMG_MBC6
+
+	Elseif ct >= &H22 Then 
+		mt=DMG_MBC7
+
+	Elseif ct >= &HFC Then
+		mt=DMG_POCKET_CAMERA
+
+	Elseif ct >= &HFD Then
+		mt=DMG_TAMA5
+
+	Elseif ct >= &HFE Then
+		mt=DMG_HuC3
+
+	Elseif ct >= &HFF Then
+		mt=DMG_HuC1
+
+	Else
+		mt=DMG_MBC_TYPE_UNKNOWN
+	End If
+
+	info.MBCType=mt
+	printf(ex"%02X ::: %s\n",ct,DMG_MBC_TYPE_STR[mt])
+
+	'54h ::: (50h --> 8Mbit) + (04h --> 4Mbit) = 12Mbit = 1.5MB
+	info.RomSize = (&H8000 << (rawHeader.RomSize And &H0F))
+	if (info.RomSize And &HF0) <> 0 Then
+		info.RomSize += &H8000 << ((rawHeader.RomSize>>4) And &H0F)
+	End If
+	
+	Const DMG_SRAM_SIZE_TABLE_MAX = 5
+	Dim DMG_SRAM_SIZE_TABLE[DMG_SRAM_SIZE_TABLE_MAX] = [
+		&H00000, 	'00h 0KB
+		&H00800,	'01h 2KB
+		&H02000, 	'02h 8KB
+		&H08000, 	'03h 32KB
+		&H20000, 	'04h 128KB
+		&H10000		'05h 64KB	'なんでやねん
+	] AS Long 
+
+	if info.MBCType = DMG_MBC2 Then
+		info.SramSize=&H2*1024
+	Else
+		info.SramSize = DMG_SRAM_SIZE_TABLE[rawHeader.SramSize Mod (DMG_SRAM_SIZE_TABLE_MAX+1)]
+	End If
+
+	info.RomVersion = rawHeader.RomVersion
+	if info.RomVersion >= &H30 Then
+		info.RomVersion = info.RomVersion - &H30
+	End If
+	
+	printf(DMG_GenerateInfoText(info))
+
+End Sub
+
+Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
+	Dim str AS StringClass
+	str.allocStr(1024)
+	str.cpy(ex"DMG ROM Infomation:\n")
+
+	str.sprintf(ex"  Title    : %s\n", info.Title)
+
+	if info.GameCode[0]<>0 Then str.sprintf(ex"  GameID   : %s\n",info.GameCode)
+
+	str.sprintf(ex"  MBC      : %s [%02X]\n  RomSize  : %d KB\n  SramSize : %d KB\n  Version  : 1.%d\n  CheckSum : %04X\n", _
+		DMG_MBC_TYPE_STR[info.MBCType],info.MBCType, _
+		info.RomSize/1024, _ 
+		info.SramSize/1024, _ 
+		info.RomVersion, _
+		info.raw.CheckSum _
+		)
+
+	if info.bLogoCheck=FALSE then str.cat(ex"!!! 接触不良 !!!\n")
+
+
+	DMG_GenerateInfoText=calloc(str.length())
+	str.copyToNewPtr(DMG_GenerateInfoText)
+End Function
+
+Sub Main()
+
+	Print "FT232H-EPROM-PROGRAMMER Test Program - RGBA_CRT 2017 v1.1"
+	Print
+	Print "Please use at your own risk!"
+	Print 
+	Dim ft AS *FT232H
+
+	ft=new FT232H()
+	printf("ft=%X",ft)
+	if ft->listupDeviceToConsole()=FALSE Then Input "[PRESS ENTER]",ft:End
+
+	Dim ftID As DWord
+	'input "Select device >",ftID
+
+	if ft->openDevice(ftID)=FALSE Then Print "OpenError" : End
+	printf(ex"device #%02d open ok.\n\n",ftID)
+
+
+	Dim fe AS *FT232H_EPROM
+	fe=New FT232H_EPROM(ft)
+	fe->ROMEnable(TRUE)
+	fe->ReadEnable(TRUE)
+
+	ft->sendCommands()
+
+	Dim header AS DMG_ROM_HEADER
+	fe->AreaReadRequest(&H0100,sizeof(DMG_ROM_HEADER))
+	ft->sendCommands()
+	ft->reciveData(VarPtr(header),sizeof(DMG_ROM_HEADER))
+	Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
+
+	Dim info AS DMG_ROM_INFO
+	DMG_rawHeaderToInfo(header,info)
+
+debug
+	
+End Sub
+
+
+
+Const FTE_SECTOR_SIZE = 64*64
+Sub RomDumpFull(length AS DWord)
+	Dim i AS DWord,out AS File,buf AS BytePtr,last AS DWord,qtes AS DWord
+	buf=calloc(FTE_SECTOR_SIZE)
+	out.openFile("dump.bin",GENERIC_WRITE)
+	Do
+		if i Mod 10 = 0 Then 
+			printf(ex"[DUMP] ADDRESS%08X/%08X ... %3d%% [%3dKB/s]\n", _
+				i*FTE_SECTOR_SIZE,length,((i*FTE_SECTOR_SIZE)/length*100) AS DWord, _
+				( (FTE_SECTOR_SIZE) / ((GetTickCount()-last)/1000)/1000   ) AS DWord, _
+			) 
+		'	ft->gpio->setExtACBus(NOT((i/10) AS Byte And &H2))
+		'	flush(ft->hFT)
+		Endif
+
+		last=GetTickCount()
+		fe->AreaReadRequest(i*FTE_SECTOR_SIZE,FTE_SECTOR_SIZE)
+		ft->sendCommands()
+		ft->reciveData(buf,FTE_SECTOR_SIZE)
+		out.write(buf,FTE_SECTOR_SIZE)
+		i++
+		if i*FTE_SECTOR_SIZE => length Then ExitDo
+	Loop
+	out.close()
+	free(buf)
+
+End Sub
+
+Sub flush(hFT AS HANDLE)
+	Dim ftStatus As Long,bufsize As DWord,buf As BytePtr,dwAB As DWord
+	
+	ftStatus = ftStatus or FT_GetQueueStatus(hFT, bufsize)		 ' Get the number of bytes in the FT2232H receive buffer
+	buf=calloc(bufsize)
+	if bufsize>0 then Print bufsize
+
+	if (ftStatus = FT_OK) And  (bufsize > 0) Then _
+		FT_Read(hFT, buf, bufsize, dwAB)  'Read out the data from FT2232H receive buffer
+	free(buf)
+End Sub
+
+Sub WriteROM(fileName AS BytePtr,offset AS DWord)
+	Dim in AS File
+	Dim buffer AS BytePtr, i AS DWord ,length AS DWord,tmp AS String
+
+	if in.openFile(fileName,GENERIC_READ) = FALSE Then Print "cannot open file":ExitSub
+	printf(ex"[OPENFILE] %s %dbytes 0x%Xbytes\n",fileName,in.length(),in.length())
+
+	buffer = calloc(in.length())
+	in.read(buffer,in.length())
+	length = in.length()
+	i=offset
+
+	Dim lap_s AS DWord,lap_e AS DWord
+	lap_s=GetTickCount()
+	do
+		printf(ex"[WRITE] ADDRESS:%08X/%08X ... %d%%  DATA:0x%02X\n",i,length,((i)/length*100) AS DWord,buffer[i])
+		
+		if fe->AreaWirte(i,buffer+i,FTE_SECTOR_SIZE)=FALSE Then
+			printf(ex"[WRITE] write error at Address 0x%08X:%02X\nPRESS ENTER\n",i,buffer[i])
+			input ">",tmp
+
+			Print
+			if tmp="e" Then ExitDo
+			if tmp="s" Then 
+				Print "skip"
+			Else
+				continue
+			End If
+		End If
+
+		i+=FTE_SECTOR_SIZE
+		if i => length Then ExitDo
+
+	Loop
+	lap_e=GetTickCount()
+	flush(ft->hFT)
+	printf(ex"[WRITE] PROGRESS COMPLATE! time:%d\n",lap_e-lap_s)
+
+	free(buffer)
+
+	ft->sendCommands()
+	in.close()
+End Sub
+
+Sub WriteFlash(fileName AS BytePtr,offset AS DWord)
+	Dim in AS File
+	Dim buffer AS BytePtr, i AS DWord ,length AS DWord,tmp AS String
+
+	if in.openFile(fileName,GENERIC_READ) = FALSE Then Print "cannot open file":ExitSub
+	printf(ex"[OPENFILE] %s %dbytes 0x%Xbytes\n",fileName,in.length(),in.length())
+
+	buffer = calloc(in.length())
+	in.read(buffer,in.length())
+	length = 128*1024'in.length()
+	i=offset
+
+	Dim lap_s AS DWord,lap_e AS DWord
+	lap_s=GetTickCount()
+	do
+		printf(ex"[WRITE] ADDRESS:%08X/%08X ... %d%%  DATA:0x%02X\n",i,length,((i)/length*100) AS DWord,buffer[i])
+		
+		if ff->AreaWirte(i,buffer+i,128)=FALSE Then
+			printf(ex"[WRITE] write error at Address 0x%08X:%02X\nPRESS ENTER\n",i,buffer[i])
+			input ">",tmp
+
+			Print
+			if tmp="e" Then ExitDo
+			if tmp<>"s" Then continue
+		End If
+
+		i+=128
+		if i > length Then ExitDo
+
+	Loop
+	lap_e=GetTickCount()
+	printf(ex"[WRITE] PROGRESS COMPLATE! time:%d\n",lap_e-lap_s)
+
+	ft->sendCommands()
+	in.close()
+End Sub
+
+

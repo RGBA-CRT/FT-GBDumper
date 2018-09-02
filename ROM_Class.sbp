@@ -1,0 +1,208 @@
+Const FT_EPROM_VPP_PIN = 4
+Const FT_EPROM_LATCH_PIN = 5
+Const FT_EPROM_ENABLE_PIN = 6
+Const FT_EPROM_READ_ENABLE_PIN = 7
+Const FT_EPROM_WRITE = &HFF
+Const FT_EPROM_READ = &H00
+
+Enum FT_EPROM_IO
+	FTE_INPUT
+	FTE_OUTPUT
+End Enum
+
+Class FT232H_PPROM_BASE
+Protected 
+	dummy AS DWord
+	Address AS DWord
+	Data AS DWord
+	dir AS FT_EPROM_IO
+	ft AS *FT232H
+	mcp As *FT232H_MCP23017
+Public
+	Sub init(ftc AS *FT232H)
+		ft=ftc
+
+		ft->gpio->setACBusDir(&HFF)
+		ft->gpio->setADBusDir(&HF0)
+		mcp=new FT232H_MCP23017(ft,3)
+
+		mcp->SetPort(&H0000,&H0000)
+		SetLatch(0)
+		
+		ROMEnable(TRUE)
+		ReadEnable(TRUE)
+
+		mcp->SetPortValWord(0)
+
+		WriteEnable(FALSE)
+		Address=0
+		dir=FTE_INPUT
+
+		ft->flush()		
+	End Sub
+
+	Sub ROMEnable(ef AS BOOL)
+		ft->gpio->setADBusBit(FT_EPROM_ENABLE_PIN,not(ef) AND &H01)
+	End Sub
+
+	Sub ReadEnable(ef AS BOOL)
+		ft->gpio->setADBusBit(FT_EPROM_READ_ENABLE_PIN,not(ef) AND &H01)
+		if ef=TRUE Then
+			SetDatabusDirection(FTE_INPUT)
+		Else
+			SetDatabusDirection(FTE_OUTPUT)
+		End If
+	End Sub
+
+	Sub SetAddress(adr AS DWord)(forceLatch As BOOL)
+		'変更の必要がある時だけLATCH 
+		if (adr xor Address) >> 16 or forceLatch Then
+			SetLatch(adr>>16)
+		End If
+
+		mcp->SetPortValWord(adr AS Word)
+
+		Address=adr
+	End Sub
+
+	Sub SetData(data AS Byte)
+		if dir=FTE_INPUT Then SetDatabusDirection(FTE_OUTPUT)
+		ft->gpio->setACBus(data AS Byte)
+	End Sub
+
+	Sub ReadDataRequest()
+		if dir=FTE_OUTPUT Then SetDatabusDirection(FTE_INPUT)
+		ft->gpio->ACBusReadRequest()
+	End Sub
+
+	Sub AreaReadRequest(adr AS DWord,length As DWord)
+		Dim i aS DWord
+		ROMEnable(TRUE)
+		ReadEnable(TRUE)
+		if dir=FTE_OUTPUT Then SetDatabusDirection(FTE_INPUT)
+	'	ft->addCommand(ex"\x9c\xa0\x00",3)	'wait
+		Do
+			SetAddress(adr+i)
+			ROMEnable(TRUE)
+			ReadEnable(TRUE)
+	'		ft->addCommand(ex"\x9c\x09\x00",3)
+			ft->gpio->ACBusReadRequest()
+			i++
+			if length<=i Then ExitDo
+		Loop
+	End Sub
+
+	Sub WriteEnable(ef AS BOOL)
+		ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,(ef) AND &H01)
+		if ef=FALSE Then
+			SetDatabusDirection(FTE_INPUT)
+		Else
+			SetDatabusDirection(FTE_OUTPUT)
+		End If
+	End Sub	
+	
+	Virtual Sub WriteByte(Address AS DWord,data AS Byte)
+
+Private
+
+	Sub SetLatch(val AS Byte)
+		ft->gpio->setADBusBit(FT_EPROM_LATCH_PIN,1)		'LATCH START
+		mcp->SetPortValA(val)							'LATCH SET
+		ft->addCommand(ex"\x9c\x39\x00",3)				'Wait 13us
+		mcp->SetPortValA(val)							'LATCH SET
+		ft->gpio->setADBusBit(FT_EPROM_LATCH_PIN,0)		'LATCH HOLD
+	End Sub
+	
+	Sub SetDatabusDirection(idr AS FT_EPROM_IO)
+		dir=idr
+		if idr=FTE_INPUT Then
+			ft->gpio->setACBusDir(FT_EPROM_READ)
+		Else
+			ft->gpio->setACBusDir(FT_EPROM_WRITE)
+		End If
+	End Sub
+End Class
+
+Class FT232H_EPROM : Inherits FT232H_PPROM_BASE
+Public
+	Sub FT232H_EPROM(ftc AS *FT232H)
+		init(ftc)
+	End Sub
+
+	Function AreaWirte(adr AS DWord,buffer AS BytePtr,length AS DWord) AS BOOL
+		Dim i AS DWord,checkBuf AS BytePtr,tmp AS DWord
+
+		ft->flush()
+
+		For i=0 To length-1
+			SetAddress(adr+i,TRUE)
+
+			WriteByte(buffer[i])
+
+			if i Mod &H10=0 Then ft->sendCommands()
+		Next i
+		
+		'ft->addCommand(ex"\x9c\xa0\x00",3)	'wait 55us 0x0080
+
+		AreaWirte=TRUE '戻り値：OK
+
+		'書き込みチェック
+		checkBuf = calloc(length+5)
+		fe->AreaReadRequest(adr,length)
+		ft->sendCommands()
+		ft->reciveData(checkBuf,length)
+
+		For i=0 To length-1
+			if buffer[i] <> checkBuf[i] Then
+				AreaWirte=FALSE	'戻り値:NG
+				ExitFor
+			End If
+		Next i
+
+		free(checkBuf)
+	End Function
+	
+	Sub WriteByte(data AS Byte)
+		WriteStart()
+
+		'PROGRAM
+		ft->addCommand(ex"\x9c\x09\x00",3)	'Wait 
+		
+		SetData(data)	'SET WRITE DATA
+		SetData(data)	'SET WRITE DATA
+
+		ft->addCommand(ex"\x9c\x20\x00",3)	'Wait
+
+		SetData(data)	'SET WRITE DATA
+	'	ROMEnable(TRUE)						'WRITE PULSE START
+		WriteEnable(TRUE)
+		SetData(data)	'SET WRITE DATA
+		ft->addCommand(ex"\x9c\xf0\x00",3)	'wait 55us
+		SetData(data)	'SET WRITE DATA
+	'	ROMEnable(FALSE)					'WRITE PULSE END
+	
+		WriteEnable(FALSE)
+
+		'wait 4us
+		ft->addCommand(ex"\x9c\x20\x00",3)	'wait
+
+		SetData(&HFF)'次のデータで誤らないように	
+
+		WriteEnd()
+	End Sub
+	
+Private
+	Sub WriteStart()
+		ROMEnable(TRUE)
+		ReadEnable(TRUE)
+		WriteEnable(FALSE)
+	End Sub
+	
+	Sub WriteEnd()
+		WriteEnable(FALSE)
+		ft->addCommand(ex"\x9c\x09\x00",3)
+	End Sub
+	
+End Class
+
+
