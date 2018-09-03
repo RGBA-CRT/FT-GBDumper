@@ -24,9 +24,10 @@ Type Align(1) DMG_ROM_HEADER
 	RomSize AS Byte
 	SramSize AS Byte
 	RegionCode AS Byte
+	MakerCode_old AS Byte
 	RomVersion AS Byte
 	HeaderComplement As Byte
-	CheckSum AS Byte
+	CheckSum AS Word
 End Type
 
 'Header‚ð‚í‚©‚è‚â‚·‚­‚µ‚½“z
@@ -86,7 +87,152 @@ Dim DMG_MBC_TYPE_STR[DMG_MBC_TYPE_MAX+1] = [
 	"MBC Unknown"
 ] AS BytePtr
 
+Const FT_COMMAND_BUFFER_SIZE = 512*1024 ' 1MB
 Main()
+
+Sub Main()
+
+	Print "FT232H-EPROM-PROGRAMMER Test Program - RGBA_CRT 2017 v1.1"
+	Print
+	Print "Please use at your own risk!"
+	Print 
+	Dim ft AS *FT232H
+
+	ft=new FT232H(FT_COMMAND_BUFFER_SIZE)
+	printf("ft=%X",ft)
+	if ft->listupDeviceToConsole()=FALSE Then Input "[PRESS ENTER]",ft:End
+
+	Dim ftID As DWord
+	'input "Select device >",ftID
+
+	if ft->openDevice(ftID)=FALSE Then Print "OpenError" : End
+	printf(ex"device #%02d open ok.\n\n",ftID)
+
+
+	Dim fe AS *FT232H_DMGROM
+	fe=New FT232H_DMGROM(ft)
+
+	Dim header AS DMG_ROM_HEADER
+	DMG_GetHeader(fe,VarPtr(header))
+	Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
+
+	Dim info AS DMG_ROM_INFO
+	DMG_rawHeaderToInfo(header,info)
+
+	Dim buf AS BytePtr,lt As DWord
+	lt=GetTickCount()
+	buf=RomDumpFull(fe,VarPtr(info))
+	lt=GetTickCount() - lt
+	printf(ex"\nProcess Time : %dms %ds\n",lt,lt/1000)
+
+	Dim actualSum As DWord
+	actualSum = DMG_CalcSum(buf,info.RomSize)
+	printf(ex"calcurated sum: %04X %04X\n",actualSum,info.raw.CheckSum)
+
+	Dim fout AS File
+	fout.openFile(info.Title,GENERIC_WRITE)
+	fout.write(buf,info.RomSize)
+	fout.close()
+
+	free(buf): buf=NULL
+
+debug
+	Sleep(-1)
+End Sub
+
+Const DMG_HEADER_ADDRESS = &H0100
+Const DMG_ADDRESS_BANK0 = &H0000
+Const DMG_ADDRESS_BANKn = &H4000
+const DMG_BANK_SIZE = 16*1024
+Const DMG_MBC_ROM_BANK_NUMBER = &H2000
+Const DMG_MBC_ROM_BANK_NUMBER_HIBYTE = &H3000
+
+Sub DMG_GetHeader(fe As *FT232H_DMGROM,header AS *DMG_ROM_HEADER)
+	fe->AreaReadRequest(DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER))
+	fe->FT_SendCommands()
+	fe->FT_ReceiveData(header,sizeof(DMG_ROM_HEADER))
+End Sub
+
+Function DMG_CalcSum(rom AS BytePtr,Length AS Long) As Word
+	Dim i AS Long
+	Dim actualSum=0 AS Word,tmp AS Word
+
+	For i=0 To Length-1
+		actualSum += rom[i]
+	Next i
+	actualSum -= rom[&H014E] 
+	actualSum -= rom[&H014F] 
+
+	tmp = actualSum>>8 Or actualSum<<8
+	DMG_CalcSum=tmp
+End Function
+
+Sub DMG_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
+	fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER As DWord)
+	fe->WriteByte(bankNum AS Byte )
+	printf("[MBC][%x]",bankNum And &HFF)
+	
+	fe->FT_SendCommands()
+	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7) Then
+		fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER_HIBYTE As DWord)
+		fe->WriteByte((bankNum>>8) AS Byte)
+		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
+	Endif
+	fe->FT_SendCommands()
+End Sub
+
+
+Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
+	Dim buf AS BytePtr
+	buf = calloc(info->RomSize)
+
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE)
+
+	dim i AS Long,bankCount As Long
+	bankCount=info->RomSize / DMG_BANK_SIZE -1
+	For i=1 To bankCount
+		printf(ex"[READ] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		DMG_RomBankSet(fe,info->MBCType,i)
+		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE)
+	Next
+	RomDumpFull=buf
+End Function
+
+
+Const FTE_SECTOR_SIZE = 1024*16
+Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) AS BOOL
+	Dim readCount AS Long, lastReadSize AS Long
+	readCount = Length / FTE_SECTOR_SIZE
+	lastReadSize = Length - readCount*FTE_SECTOR_SIZE
+
+	Dim i As Long,readOffset AS DWord
+	Do
+		if i => readCount Then ExitDo
+
+		readOffset = i*FTE_SECTOR_SIZE
+'		printf(ex"READ %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,FTE_SECTOR_SIZE)
+		
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_SECTOR_SIZE )
+
+		i++
+	Loop
+
+	if lastReadSize > 0 Then
+		readOffset = i*FTE_SECTOR_SIZE
+'		printf(ex"Last %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize )
+	End If
+
+End Function
+
+Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) As BOOL
+	fe->AreaReadRequest(Address,Length)
+	fe->FT_SendCommands()
+	FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
+End Function
+
+'-----------------------------------------------------------------------------------------
+
 
 Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_INFO)
 	memcpy(VarPtr(info),VarPtr(rawHeader),sizeof(DMG_ROM_HEADER))
@@ -138,19 +284,19 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	Elseif ct = &H20 Then
 		mt=DMG_MBC6
 
-	Elseif ct >= &H22 Then 
+	Elseif ct = &H22 Then 
 		mt=DMG_MBC7
 
-	Elseif ct >= &HFC Then
+	Elseif ct = &HFC Then
 		mt=DMG_POCKET_CAMERA
 
-	Elseif ct >= &HFD Then
+	Elseif ct = &HFD Then
 		mt=DMG_TAMA5
 
-	Elseif ct >= &HFE Then
+	Elseif ct = &HFE Then
 		mt=DMG_HuC3
 
-	Elseif ct >= &HFF Then
+	Elseif ct = &HFF Then
 		mt=DMG_HuC1
 
 	Else
@@ -208,88 +354,25 @@ Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 		info.raw.CheckSum _
 		)
 
-	if info.bLogoCheck=FALSE then str.cat(ex"!!! ÚG•s—Ç !!!\n")
+	str.cat(ex"  Contact  : ")
+	if info.bLogoCheck=FALSE then 
+		str.cat(ex"ÚG•s—Ç [Contact Failue]\n")
+	Else
+		str.cat(ex"OK\n")
+	End If
 
 
 	DMG_GenerateInfoText=calloc(str.length())
 	str.copyToNewPtr(DMG_GenerateInfoText)
 End Function
 
-Sub Main()
-
-	Print "FT232H-EPROM-PROGRAMMER Test Program - RGBA_CRT 2017 v1.1"
-	Print
-	Print "Please use at your own risk!"
-	Print 
-	Dim ft AS *FT232H
-
-	ft=new FT232H()
-	printf("ft=%X",ft)
-	if ft->listupDeviceToConsole()=FALSE Then Input "[PRESS ENTER]",ft:End
-
-	Dim ftID As DWord
-	'input "Select device >",ftID
-
-	if ft->openDevice(ftID)=FALSE Then Print "OpenError" : End
-	printf(ex"device #%02d open ok.\n\n",ftID)
-
-
-	Dim fe AS *FT232H_EPROM
-	fe=New FT232H_EPROM(ft)
-	fe->ROMEnable(TRUE)
-	fe->ReadEnable(TRUE)
-
-	ft->sendCommands()
-
-	Dim header AS DMG_ROM_HEADER
-	fe->AreaReadRequest(&H0100,sizeof(DMG_ROM_HEADER))
-	ft->sendCommands()
-	ft->reciveData(VarPtr(header),sizeof(DMG_ROM_HEADER))
-	Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
-
-	Dim info AS DMG_ROM_INFO
-	DMG_rawHeaderToInfo(header,info)
-
-debug
-	
-End Sub
-
-
-
-Const FTE_SECTOR_SIZE = 64*64
-Sub RomDumpFull(length AS DWord)
-	Dim i AS DWord,out AS File,buf AS BytePtr,last AS DWord,qtes AS DWord
-	buf=calloc(FTE_SECTOR_SIZE)
-	out.openFile("dump.bin",GENERIC_WRITE)
-	Do
-		if i Mod 10 = 0 Then 
-			printf(ex"[DUMP] ADDRESS%08X/%08X ... %3d%% [%3dKB/s]\n", _
-				i*FTE_SECTOR_SIZE,length,((i*FTE_SECTOR_SIZE)/length*100) AS DWord, _
-				( (FTE_SECTOR_SIZE) / ((GetTickCount()-last)/1000)/1000   ) AS DWord, _
-			) 
-		'	ft->gpio->setExtACBus(NOT((i/10) AS Byte And &H2))
-		'	flush(ft->hFT)
-		Endif
-
-		last=GetTickCount()
-		fe->AreaReadRequest(i*FTE_SECTOR_SIZE,FTE_SECTOR_SIZE)
-		ft->sendCommands()
-		ft->reciveData(buf,FTE_SECTOR_SIZE)
-		out.write(buf,FTE_SECTOR_SIZE)
-		i++
-		if i*FTE_SECTOR_SIZE => length Then ExitDo
-	Loop
-	out.close()
-	free(buf)
-
-End Sub
 
 Sub flush(hFT AS HANDLE)
 	Dim ftStatus As Long,bufsize As DWord,buf As BytePtr,dwAB As DWord
 	
 	ftStatus = ftStatus or FT_GetQueueStatus(hFT, bufsize)		 ' Get the number of bytes in the FT2232H receive buffer
 	buf=calloc(bufsize)
-	if bufsize>0 then Print bufsize
+	if bufsize>0 then printf(ex"[flush] %d bytes\n", bufsize)
 
 	if (ftStatus = FT_OK) And  (bufsize > 0) Then _
 		FT_Read(hFT, buf, bufsize, dwAB)  'Read out the data from FT2232H receive buffer

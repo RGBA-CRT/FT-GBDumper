@@ -100,8 +100,16 @@ Public
 			SetDatabusDirection(FTE_OUTPUT)
 		End If
 	End Sub	
+
+	Function FT_SendCommands() AS BOOL
+		FT_SendCommands = ft->sendCommands()
+	End Function
+
+	Function FT_ReceiveData(data AS BytePtr,length AS DWord) AS BOOL
+		FT_ReceiveData = ft->reciveData(data,length)
+	End Function
 	
-	Virtual Sub WriteByte(Address AS DWord,data AS Byte)
+	Virtual Sub WriteByte(data AS Byte)
 
 Private
 
@@ -123,9 +131,9 @@ Private
 	End Sub
 End Class
 
-Class FT232H_EPROM : Inherits FT232H_PPROM_BASE
+Class FT232H_DMGROM : Inherits FT232H_PPROM_BASE
 Public
-	Sub FT232H_EPROM(ftc AS *FT232H)
+	Sub FT232H_DMGROM(ftc AS *FT232H)
 		init(ftc)
 	End Sub
 
@@ -163,24 +171,18 @@ Public
 	End Function
 	
 	Sub WriteByte(data AS Byte)
-		WriteStart()
+		ROMEnable(FALSE)
+		ReadEnable(FALSE)
 
 		'PROGRAM
 		ft->addCommand(ex"\x9c\x09\x00",3)	'Wait 
 		
 		SetData(data)	'SET WRITE DATA
-		SetData(data)	'SET WRITE DATA
-
 		ft->addCommand(ex"\x9c\x20\x00",3)	'Wait
 
-		SetData(data)	'SET WRITE DATA
-	'	ROMEnable(TRUE)						'WRITE PULSE START
 		WriteEnable(TRUE)
-		SetData(data)	'SET WRITE DATA
 		ft->addCommand(ex"\x9c\xf0\x00",3)	'wait 55us
-		SetData(data)	'SET WRITE DATA
-	'	ROMEnable(FALSE)					'WRITE PULSE END
-	
+
 		WriteEnable(FALSE)
 
 		'wait 4us
@@ -188,20 +190,13 @@ Public
 
 		SetData(&HFF)'ŽŸ‚Ìƒf[ƒ^‚ÅŒë‚ç‚È‚¢‚æ‚¤‚É	
 
-		WriteEnd()
+		
+		ROMEnable(TRUE)
+		ReadEnable(TRUE)
+		ft->addCommand(ex"\x9c\x09\x00",3)
 	End Sub
 	
 Private
-	Sub WriteStart()
-		ROMEnable(TRUE)
-		ReadEnable(TRUE)
-		WriteEnable(FALSE)
-	End Sub
-	
-	Sub WriteEnd()
-		WriteEnable(FALSE)
-		ft->addCommand(ex"\x9c\x09\x00",3)
-	End Sub
 	
 End Class
 

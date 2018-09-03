@@ -4,7 +4,7 @@
 
 #MODULETYPE=0
 
-#NAME=FTLIB
+#NAME=FT_GBDumper
 
 #PLATFORM=32
 
@@ -21,3 +21,5 @@
 #SOURCE
 GBDumper.abp
 ROM_Class.sbp
+..\FT232HLib_debug.sbp
+..\MCP23017_Lib.sbp
