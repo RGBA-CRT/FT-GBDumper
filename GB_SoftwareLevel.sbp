@@ -112,7 +112,7 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	info.Title[15]=0
 
 	'タイトルが16文字より少ない場合、ゲームIDがタイトルの後ろの方に書かれていることがある。
-	/*if info.Title[10]=&H00 Then	*/memcpy(info.GameCode,VarPtr(info.Title[11]),4)
+	if info.Title[10]=&H00 Then	memcpy(info.GameCode,VarPtr(info.Title[11]),4)
 
 	If rawHeader.GBCFlag = &HC0 Then
 		info.ConsoleFlag = DMG_CF_GBC	'GBC専用
@@ -128,10 +128,13 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	if ct=0 or ct=8 or ct=09 Then 
 		mt=DMG_NO_MBC
 
-	Elseif ct >= &H01 And ct<=&H05 Then
+	Elseif ct >= &H01 And ct<=&H03 Then
 		mt=DMG_MBC1
 
-	Elseif ct >= &H0B And ct<=&H0B Then
+	Elseif ct >= &H05 And ct<=&H06 Then
+		mt=DMG_MBC2
+
+	Elseif ct >= &H0B And ct<=&H0D Then
 		mt=DMG_MMM01
 
 	Elseif ct >= &H0F And ct<=&H012 Then
@@ -206,7 +209,7 @@ Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 	if info.GameCode[0]<>0 Then str.sprintf(ex"  GameID   : %s\n",info.GameCode)
 
 	str.sprintf(ex"  MBC      : %s [%02X]\n  RomSize  : %d KB\n  SramSize : %d KB\n  Version  : 1.%d\n  CheckSum : %04X\n", _
-		DMG_MBC_TYPE_STR[info.MBCType],info.MBCType, _
+		DMG_MBC_TYPE_STR[info.MBCType],info.raw.CartType, _
 		info.RomSize/1024, _ 
 		info.SramSize/1024, _ 
 		info.RomVersion, _
@@ -249,17 +252,23 @@ End Function
 
 '4000h-7FFFhのROMバンクをセットする
 Sub DMG_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
-	fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER As DWord)
+
+	if mbc=DMG_MBC2 Then
+		fe->SetAddress(&H2100 As DWord)
+	Else
+		fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER As DWord)
+	End If
+
 	fe->WriteByte(bankNum AS Byte )
 	printf("[MBC][%x]",bankNum And &HFF)
 	
-	fe->FT_SendCommands()
+'	fe->FT_SendCommands()
 	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7) Then
 		fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER_HIBYTE As DWord)
 		fe->WriteByte((bankNum>>8) AS Byte)
 		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
 	Endif
-	fe->FT_SendCommands()
+'	fe->FT_SendCommands()
 End Sub
 
 

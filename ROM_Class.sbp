@@ -18,6 +18,9 @@ Protected
 	dir AS FT_EPROM_IO
 	ft AS *FT232H
 	mcp As *FT232H_MCP23017
+	bRomEnalbe AS BOOL
+	bReadEnable AS BOOL
+	bWriteEnable AS BOOL
 Public
 	Sub init(ftc AS *FT232H)
 		ft=ftc
@@ -29,12 +32,16 @@ Public
 		mcp->SetPort(&H0000,&H0000)
 		SetLatch(0)
 		
+		bRomEnalbe=FALSE
+		bReadEnable=FALSE
+		bWriteEnable=TRUE
+
 		ROMEnable(TRUE)
 		ReadEnable(TRUE)
+		WriteEnable(FALSE)
 
 		mcp->SetPortValWord(0)
 
-		WriteEnable(FALSE)
 		Address=0
 		dir=FTE_INPUT
 
@@ -42,15 +49,21 @@ Public
 	End Sub
 
 	Sub ROMEnable(ef AS BOOL)
-		ft->gpio->setADBusBit(FT_EPROM_ENABLE_PIN,not(ef) AND &H01)
+		if bRomEnalbe <> ef Then 
+			ft->gpio->setADBusBit(FT_EPROM_ENABLE_PIN,not(ef) AND &H01)
+			bRomEnalbe=ef
+		End If
 	End Sub
 
 	Sub ReadEnable(ef AS BOOL)
-		ft->gpio->setADBusBit(FT_EPROM_READ_ENABLE_PIN,not(ef) AND &H01)
-		if ef=TRUE Then
-			SetDatabusDirection(FTE_INPUT)
-		Else
-			SetDatabusDirection(FTE_OUTPUT)
+		if bReadEnable <> ef Then
+			ft->gpio->setADBusBit(FT_EPROM_READ_ENABLE_PIN,not(ef) AND &H01)
+			if ef=TRUE Then
+				SetDatabusDirection(FTE_INPUT)
+			Else
+				SetDatabusDirection(FTE_OUTPUT)
+			End If
+			bReadEnable=ef
 		End If
 	End Sub
 
@@ -80,12 +93,9 @@ Public
 		ROMEnable(TRUE)
 		ReadEnable(TRUE)
 		if dir=FTE_OUTPUT Then SetDatabusDirection(FTE_INPUT)
-	'	ft->addCommand(ex"\x9c\xa0\x00",3)	'wait
+
 		Do
 			SetAddress(adr+i)
-			ROMEnable(TRUE)
-			ReadEnable(TRUE)
-	'		ft->addCommand(ex"\x9c\x09\x00",3)
 			ft->gpio->ACBusReadRequest()
 			i++
 			if length<=i Then ExitDo
@@ -93,11 +103,14 @@ Public
 	End Sub
 
 	Sub WriteEnable(ef AS BOOL)
-		ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,(ef) AND &H01)
-		if ef=FALSE Then
-			SetDatabusDirection(FTE_INPUT)
-		Else
-			SetDatabusDirection(FTE_OUTPUT)
+		if bWriteEnable <> ef Then
+			ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,(ef) AND &H01)
+			if ef=FALSE Then
+				SetDatabusDirection(FTE_INPUT)
+			Else
+				SetDatabusDirection(FTE_OUTPUT)
+			End If
+			bWriteEnable=ef
 		End If
 	End Sub	
 

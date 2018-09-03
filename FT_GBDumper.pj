@@ -23,3 +23,4 @@ GBDumper.abp
 ROM_Class.sbp
 GB_SoftwareLevel.sbp
 GB_HardwareLevel.sbp
+..\FT232HLib_debug.sbp
