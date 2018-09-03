@@ -9,83 +9,12 @@
 #include "..\FT232HLib_debug.sbp"
 'RGBALib
 #include <RGBALib.sbp>
+#include "GB_HardwareLevel.sbp"
+#include "GB_SoftwareLevel.sbp"
 #include "ROM_Class.sbp"
 #console
 
 
-Type Align(1) DMG_ROM_HEADER 
-	EntryPoint AS DWord	'0100h
-	NLogo[47] AS Byte	'0104h
-	Title[14] AS Byte	'0134h
-	GBCFlag AS Byte		'0143h
-	MakerCode AS Word	'0144h
-	SGBFlag AS Byte		'146
-	CartType AS Byte		
-	RomSize AS Byte
-	SramSize AS Byte
-	RegionCode AS Byte
-	MakerCode_old AS Byte
-	RomVersion AS Byte
-	HeaderComplement As Byte
-	CheckSum AS Word
-End Type
-
-'Headerをわかりやすくした奴
-Type DMG_ROM_INFO
-	raw AS DMG_ROM_HEADER
-	bLogoCheck AS BOOL
-	Title[15] AS Byte
-	GameCode[4] AS Byte	'文字列扱い(Null終端)
-	ConsoleFlag AS Long
-	MBCType AS DMG_MBC_TYPE
-	RomSize AS DWord
-	SramSize AS DWord
-	RomVersion As DWord
-End Type
-
-Const DMG_NLOGO_SUM = &H1546
-
-Enum DMG_CONSOLE_FLAG
-	DMG_CF_NGB = &H01
-	DMG_CF_SGB = &H02
-	DMG_CF_GBC = &H04
-End Enum
-
-Enum DMG_MBC_TYPE
-	DMG_NO_MBC = 0
-	DMG_MBC1
-	DMG_MBC2
-	DMG_MBC3
-	DMG_MBC4
-	DMG_MBC5
-	DMG_MBC6
-	DMG_MBC7
-	DMG_MMM01
-	DMG_POCKET_CAMERA
-	DMG_TAMA5
-	DMG_HuC3
-	DMG_HuC1
-	DMG_MBC_TYPE_MAX
-	DMG_MBC_TYPE_UNKNOWN
-End Enum
-
-Dim DMG_MBC_TYPE_STR[DMG_MBC_TYPE_MAX+1] = [
-	"DMG_NO_MBC",
-	"DMG_MBC1",
-	"DMG_MBC2",
-	"DMG_MBC3",
-	"DMG_MBC4",
-	"DMG_MBC5",
-	"DMG_MBC6",
-	"DMG_MBC7",
-	"DMG_MMM01",
-	"DMG_POCKET_CAMERA",
-	"DMG_TAMA5",
-	"DMG_HuC3",
-	"DMG_HuC1",
-	"MBC BUG",
-	"MBC Unknown"
-] AS BytePtr
 
 Const FT_COMMAND_BUFFER_SIZE = 512*1024 ' 1MB
 Main()
@@ -112,12 +41,29 @@ Sub Main()
 	Dim fe AS *FT232H_DMGROM
 	fe=New FT232H_DMGROM(ft)
 
-	Dim header AS DMG_ROM_HEADER
-	DMG_GetHeader(fe,VarPtr(header))
-	Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
+	Dim c AS Long
+	Do
+		Dim header AS DMG_ROM_HEADER
+		DMG_GetHeader(fe,VarPtr(header))
+		Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
 
-	Dim info AS DMG_ROM_INFO
-	DMG_rawHeaderToInfo(header,info)
+		Dim info AS DMG_ROM_INFO
+		DMG_rawHeaderToInfo(header,info)
+
+		input ex"\n1.Dump ROM 2.Dump SRAM\n> ",c
+
+		if c=1 Then
+			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
+		Elseif c=2 Then
+
+		End If
+	Loop
+debug
+	Sleep(-1)
+End Sub
+
+
+Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
 
 	Dim buf AS BytePtr,lt As DWord
 	lt=GetTickCount()
@@ -130,334 +76,13 @@ Sub Main()
 	printf(ex"calcurated sum: %04X %04X\n",actualSum,info.raw.CheckSum)
 
 	Dim fout AS File
-	fout.openFile(info.Title,GENERIC_WRITE)
+	fout.openFile(filename,GENERIC_WRITE)
 	fout.write(buf,info.RomSize)
 	fout.close()
 
 	free(buf): buf=NULL
 
-debug
-	Sleep(-1)
-End Sub
-
-Const DMG_HEADER_ADDRESS = &H0100
-Const DMG_ADDRESS_BANK0 = &H0000
-Const DMG_ADDRESS_BANKn = &H4000
-const DMG_BANK_SIZE = 16*1024
-Const DMG_MBC_ROM_BANK_NUMBER = &H2000
-Const DMG_MBC_ROM_BANK_NUMBER_HIBYTE = &H3000
-
-Sub DMG_GetHeader(fe As *FT232H_DMGROM,header AS *DMG_ROM_HEADER)
-	fe->AreaReadRequest(DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER))
-	fe->FT_SendCommands()
-	fe->FT_ReceiveData(header,sizeof(DMG_ROM_HEADER))
-End Sub
-
-Function DMG_CalcSum(rom AS BytePtr,Length AS Long) As Word
-	Dim i AS Long
-	Dim actualSum=0 AS Word,tmp AS Word
-
-	For i=0 To Length-1
-		actualSum += rom[i]
-	Next i
-	actualSum -= rom[&H014E] 
-	actualSum -= rom[&H014F] 
-
-	tmp = actualSum>>8 Or actualSum<<8
-	DMG_CalcSum=tmp
 End Function
 
-Sub DMG_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
-	fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER As DWord)
-	fe->WriteByte(bankNum AS Byte )
-	printf("[MBC][%x]",bankNum And &HFF)
-	
-	fe->FT_SendCommands()
-	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7) Then
-		fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER_HIBYTE As DWord)
-		fe->WriteByte((bankNum>>8) AS Byte)
-		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
-	Endif
-	fe->FT_SendCommands()
-End Sub
-
-
-Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
-	Dim buf AS BytePtr
-	buf = calloc(info->RomSize)
-
-	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE)
-
-	dim i AS Long,bankCount As Long
-	bankCount=info->RomSize / DMG_BANK_SIZE -1
-	For i=1 To bankCount
-		printf(ex"[READ] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
-		DMG_RomBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE)
-	Next
-	RomDumpFull=buf
-End Function
-
-
-Const FTE_SECTOR_SIZE = 1024*16
-Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) AS BOOL
-	Dim readCount AS Long, lastReadSize AS Long
-	readCount = Length / FTE_SECTOR_SIZE
-	lastReadSize = Length - readCount*FTE_SECTOR_SIZE
-
-	Dim i As Long,readOffset AS DWord
-	Do
-		if i => readCount Then ExitDo
-
-		readOffset = i*FTE_SECTOR_SIZE
-'		printf(ex"READ %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,FTE_SECTOR_SIZE)
-		
-		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_SECTOR_SIZE )
-
-		i++
-	Loop
-
-	if lastReadSize > 0 Then
-		readOffset = i*FTE_SECTOR_SIZE
-'		printf(ex"Last %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
-		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize )
-	End If
-
-End Function
-
-Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) As BOOL
-	fe->AreaReadRequest(Address,Length)
-	fe->FT_SendCommands()
-	FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
-End Function
 
 '-----------------------------------------------------------------------------------------
-
-
-Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_INFO)
-	memcpy(VarPtr(info),VarPtr(rawHeader),sizeof(DMG_ROM_HEADER))
-
-	Dim i AS Long,sum AS DWord
-	For i=0 To 47
-		sum+=rawHeader.NLogo[i]
-	Next
-
-	if sum=DMG_NLOGO_SUM Then 
-		info.bLogoCheck=TRUE
-	Else
-		info.bLogoCheck=FALSE
-		printf("LogoCheck NG")
-	End If
-
-	memcpy(info.Title,rawHeader.Title,15)
-	info.Title[15]=0
-
-	'タイトルが16文字より少ない場合、ゲームIDがタイトルの後ろの方に書かれていることがある。
-	/*if info.Title[10]=&H00 Then	*/memcpy(info.GameCode,VarPtr(info.Title[11]),4)
-
-	If rawHeader.GBCFlag = &HC0 Then
-		info.ConsoleFlag = DMG_CF_GBC	'GBC専用
-	Else
-		info.ConsoleFlag = DMG_CF_NGB
-		if rawHeader.GBCFlag = &H80 Then	info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_GBC
-		if rawHeader.SGBFlag <> &H00 Then	info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_SGB
-	Endif
-
-	Dim ct AS Byte, mt AS DMG_MBC_TYPE
-	ct=rawHeader.CartType
-
-	if ct=0 or ct=8 or ct=09 Then 
-		mt=DMG_NO_MBC
-
-	Elseif ct >= &H01 And ct<=&H05 Then
-		mt=DMG_MBC1
-
-	Elseif ct >= &H0B And ct<=&H0B Then
-		mt=DMG_MMM01
-
-	Elseif ct >= &H0F And ct<=&H012 Then
-		mt=DMG_MBC3
-
-	Elseif ct >= &H19 And ct<=&H1E Then
-		mt=DMG_MBC5
-
-	Elseif ct = &H20 Then
-		mt=DMG_MBC6
-
-	Elseif ct = &H22 Then 
-		mt=DMG_MBC7
-
-	Elseif ct = &HFC Then
-		mt=DMG_POCKET_CAMERA
-
-	Elseif ct = &HFD Then
-		mt=DMG_TAMA5
-
-	Elseif ct = &HFE Then
-		mt=DMG_HuC3
-
-	Elseif ct = &HFF Then
-		mt=DMG_HuC1
-
-	Else
-		mt=DMG_MBC_TYPE_UNKNOWN
-	End If
-
-	info.MBCType=mt
-	printf(ex"%02X ::: %s\n",ct,DMG_MBC_TYPE_STR[mt])
-
-	'54h ::: (50h --> 8Mbit) + (04h --> 4Mbit) = 12Mbit = 1.5MB
-	info.RomSize = (&H8000 << (rawHeader.RomSize And &H0F))
-	if (info.RomSize And &HF0) <> 0 Then
-		info.RomSize += &H8000 << ((rawHeader.RomSize>>4) And &H0F)
-	End If
-	
-	Const DMG_SRAM_SIZE_TABLE_MAX = 5
-	Dim DMG_SRAM_SIZE_TABLE[DMG_SRAM_SIZE_TABLE_MAX] = [
-		&H00000, 	'00h 0KB
-		&H00800,	'01h 2KB
-		&H02000, 	'02h 8KB
-		&H08000, 	'03h 32KB
-		&H20000, 	'04h 128KB
-		&H10000		'05h 64KB	'なんでやねん
-	] AS Long 
-
-	if info.MBCType = DMG_MBC2 Then
-		info.SramSize=&H2*1024
-	Else
-		info.SramSize = DMG_SRAM_SIZE_TABLE[rawHeader.SramSize Mod (DMG_SRAM_SIZE_TABLE_MAX+1)]
-	End If
-
-	info.RomVersion = rawHeader.RomVersion
-	if info.RomVersion >= &H30 Then
-		info.RomVersion = info.RomVersion - &H30
-	End If
-	
-	printf(DMG_GenerateInfoText(info))
-
-End Sub
-
-Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
-	Dim str AS StringClass
-	str.allocStr(1024)
-	str.cpy(ex"DMG ROM Infomation:\n")
-
-	str.sprintf(ex"  Title    : %s\n", info.Title)
-
-	if info.GameCode[0]<>0 Then str.sprintf(ex"  GameID   : %s\n",info.GameCode)
-
-	str.sprintf(ex"  MBC      : %s [%02X]\n  RomSize  : %d KB\n  SramSize : %d KB\n  Version  : 1.%d\n  CheckSum : %04X\n", _
-		DMG_MBC_TYPE_STR[info.MBCType],info.MBCType, _
-		info.RomSize/1024, _ 
-		info.SramSize/1024, _ 
-		info.RomVersion, _
-		info.raw.CheckSum _
-		)
-
-	str.cat(ex"  Contact  : ")
-	if info.bLogoCheck=FALSE then 
-		str.cat(ex"接触不良 [Contact Failue]\n")
-	Else
-		str.cat(ex"OK\n")
-	End If
-
-
-	DMG_GenerateInfoText=calloc(str.length())
-	str.copyToNewPtr(DMG_GenerateInfoText)
-End Function
-
-
-Sub flush(hFT AS HANDLE)
-	Dim ftStatus As Long,bufsize As DWord,buf As BytePtr,dwAB As DWord
-	
-	ftStatus = ftStatus or FT_GetQueueStatus(hFT, bufsize)		 ' Get the number of bytes in the FT2232H receive buffer
-	buf=calloc(bufsize)
-	if bufsize>0 then printf(ex"[flush] %d bytes\n", bufsize)
-
-	if (ftStatus = FT_OK) And  (bufsize > 0) Then _
-		FT_Read(hFT, buf, bufsize, dwAB)  'Read out the data from FT2232H receive buffer
-	free(buf)
-End Sub
-
-Sub WriteROM(fileName AS BytePtr,offset AS DWord)
-	Dim in AS File
-	Dim buffer AS BytePtr, i AS DWord ,length AS DWord,tmp AS String
-
-	if in.openFile(fileName,GENERIC_READ) = FALSE Then Print "cannot open file":ExitSub
-	printf(ex"[OPENFILE] %s %dbytes 0x%Xbytes\n",fileName,in.length(),in.length())
-
-	buffer = calloc(in.length())
-	in.read(buffer,in.length())
-	length = in.length()
-	i=offset
-
-	Dim lap_s AS DWord,lap_e AS DWord
-	lap_s=GetTickCount()
-	do
-		printf(ex"[WRITE] ADDRESS:%08X/%08X ... %d%%  DATA:0x%02X\n",i,length,((i)/length*100) AS DWord,buffer[i])
-		
-		if fe->AreaWirte(i,buffer+i,FTE_SECTOR_SIZE)=FALSE Then
-			printf(ex"[WRITE] write error at Address 0x%08X:%02X\nPRESS ENTER\n",i,buffer[i])
-			input ">",tmp
-
-			Print
-			if tmp="e" Then ExitDo
-			if tmp="s" Then 
-				Print "skip"
-			Else
-				continue
-			End If
-		End If
-
-		i+=FTE_SECTOR_SIZE
-		if i => length Then ExitDo
-
-	Loop
-	lap_e=GetTickCount()
-	flush(ft->hFT)
-	printf(ex"[WRITE] PROGRESS COMPLATE! time:%d\n",lap_e-lap_s)
-
-	free(buffer)
-
-	ft->sendCommands()
-	in.close()
-End Sub
-
-Sub WriteFlash(fileName AS BytePtr,offset AS DWord)
-	Dim in AS File
-	Dim buffer AS BytePtr, i AS DWord ,length AS DWord,tmp AS String
-
-	if in.openFile(fileName,GENERIC_READ) = FALSE Then Print "cannot open file":ExitSub
-	printf(ex"[OPENFILE] %s %dbytes 0x%Xbytes\n",fileName,in.length(),in.length())
-
-	buffer = calloc(in.length())
-	in.read(buffer,in.length())
-	length = 128*1024'in.length()
-	i=offset
-
-	Dim lap_s AS DWord,lap_e AS DWord
-	lap_s=GetTickCount()
-	do
-		printf(ex"[WRITE] ADDRESS:%08X/%08X ... %d%%  DATA:0x%02X\n",i,length,((i)/length*100) AS DWord,buffer[i])
-		
-		if ff->AreaWirte(i,buffer+i,128)=FALSE Then
-			printf(ex"[WRITE] write error at Address 0x%08X:%02X\nPRESS ENTER\n",i,buffer[i])
-			input ">",tmp
-
-			Print
-			if tmp="e" Then ExitDo
-			if tmp<>"s" Then continue
-		End If
-
-		i+=128
-		if i > length Then ExitDo
-
-	Loop
-	lap_e=GetTickCount()
-	printf(ex"[WRITE] PROGRESS COMPLATE! time:%d\n",lap_e-lap_s)
-
-	ft->sendCommands()
-	in.close()
-End Sub
-
-

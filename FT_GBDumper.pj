@@ -14,12 +14,12 @@
 
 #OUTPUT_RELEASE=.\FT-GBDumper.exe
 
-#OUTPUT_DEBUG=.\FT-GBDumper.exe
+#OUTPUT_DEBUG=.\FT-GBDumper_debug.exe
 
 #RESOURCE=0
 
 #SOURCE
 GBDumper.abp
 ROM_Class.sbp
-..\FT232HLib_debug.sbp
-..\MCP23017_Lib.sbp
+GB_SoftwareLevel.sbp
+GB_HardwareLevel.sbp

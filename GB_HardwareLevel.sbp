@@ -1,0 +1,48 @@
+
+
+'GBのカートリッジアクセス
+Const FTE_SECTOR_SIZE = 1024*16
+Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) AS BOOL
+	Dim readCount AS Long, lastReadSize AS Long
+	readCount = Length / FTE_SECTOR_SIZE
+	lastReadSize = Length - readCount*FTE_SECTOR_SIZE
+
+	Dim i As Long,readOffset AS DWord
+	Do
+		if i => readCount Then ExitDo
+
+		readOffset = i*FTE_SECTOR_SIZE
+'		printf(ex"READ %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,FTE_SECTOR_SIZE)
+		
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_SECTOR_SIZE )
+
+		i++
+	Loop
+
+	if lastReadSize > 0 Then
+		readOffset = i*FTE_SECTOR_SIZE
+'		printf(ex"Last %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize )
+	End If
+
+	DMG_ReadCart=TRUE
+End Function
+
+'[低レイヤな転送] １回の転送
+Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) As BOOL
+	fe->AreaReadRequest(Address,Length)
+	fe->FT_SendCommands()
+	FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
+End Function
+
+Sub flush(hFT AS HANDLE)
+	Dim ftStatus As Long,bufsize As DWord,buf As BytePtr,dwAB As DWord
+	
+	ftStatus = ftStatus or FT_GetQueueStatus(hFT, bufsize)		 ' Get the number of bytes in the FT2232H receive buffer
+	buf=calloc(bufsize)
+	if bufsize>0 then printf(ex"[flush] %d bytes\n", bufsize)
+
+	if (ftStatus = FT_OK) And  (bufsize > 0) Then _
+		FT_Read(hFT, buf, bufsize, dwAB)  'Read out the data from FT2232H receive buffer
+	free(buf)
+End Sub
