@@ -16,7 +16,7 @@
 
 
 
-Const FT_COMMAND_BUFFER_SIZE = 512*1024 ' 1MB
+Const FT_COMMAND_BUFFER_SIZE = 700*1024 ' 1MB
 Main()
 
 Sub Main()
@@ -49,14 +49,53 @@ Sub Main()
 
 		Dim info AS DMG_ROM_INFO
 		DMG_rawHeaderToInfo(header,info)
-
+		
 		input ex"\n1.Dump ROM 2.Dump SRAM\n> ",c
 
+		DMG_GetHeader(fe,VarPtr(header))
+		DMG_rawHeaderToInfo(header,info)
+	/*	info.RomSize= (128*1024) AS DWord
+		lstrcpy(info.Title,"test.bin")
+		info.MBCType=DMG_MBC5
+*/
+		ft->flush()
 		if c=1 Then
 			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
 		Elseif c=2 Then
+			DumpSramToFile(fe,sprintfStr("%s.sav",info.Title),info)
+		else if c=4 Then
+			GBMC_RegisterWrite(fe, &H0120, &H09)
+			GBMC_RegisterWrite(fe, &H0121, &Haa)
+			GBMC_RegisterWrite(fe, &H0122, &H55)
+			GBMC_RegisterWrite(fe, &H013f, &Ha5)
 
+
+			GBMC_RegisterWrite(fe, &H0120, &H05)
+			GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
+			GBMC_RegisterWrite(fe, &H0120, &H10)
+			GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
+			printf(ex"npchk=%x\n",FT232H_ReadByte(fe,&H013f))
+
+			GBMC_RegisterWrite(fe, &H0120, &H11)
+			GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
+			GBMC_RegisterWrite(fe, &H0120, &H08)
+			GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
+		else if c=3 Then
+
+			Dim buf[512] AS byte
+			MBC_RamEnable(fe,DMG_MBC2,TRUE)
+	
+	'		fe->ROMEnable(FALSE)	
+			FT232H_ReadEPROM(fe,buf,&HA100,512)
+			Dump(buf,512)
+			fe->ROMEnable(TRUE)
+			MBC_RamEnable(fe,DMG_MBC2,FALSE)
 		End If
+		ft->flush()
 	Loop
 debug
 	Sleep(-1)
@@ -78,6 +117,20 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 	Dim fout AS File
 	fout.openFile(filename,GENERIC_WRITE)
 	fout.write(buf,info.RomSize)
+	fout.close()
+
+	free(buf): buf=NULL
+
+End Function
+
+Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
+
+	Dim buf AS BytePtr
+	buf=SramDumpFull(fe,VarPtr(info))
+
+	Dim fout AS File
+	fout.openFile(filename,GENERIC_WRITE)
+	fout.write(buf,info.SramSize)
 	fout.close()
 
 	free(buf): buf=NULL

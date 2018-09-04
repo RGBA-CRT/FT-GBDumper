@@ -43,7 +43,8 @@ Public
 		mcp->SetPortValWord(0)
 
 		Address=0
-		dir=FTE_INPUT
+		dir=FTE_OUTPUT
+		SetDatabusDirection(FTE_INPUT)
 
 		ft->flush()		
 	End Sub
@@ -79,26 +80,38 @@ Public
 	End Sub
 
 	Sub SetData(data AS Byte)
-		if dir=FTE_INPUT Then SetDatabusDirection(FTE_OUTPUT)
+		SetDatabusDirection(FTE_OUTPUT)
 		ft->gpio->setACBus(data AS Byte)
 	End Sub
 
 	Sub ReadDataRequest()
-		if dir=FTE_OUTPUT Then SetDatabusDirection(FTE_INPUT)
+		SetDatabusDirection(FTE_INPUT)
+		
+		ReadEnable(TRUE)
 		ft->gpio->ACBusReadRequest()
+		ReadEnable(FALSE)
 	End Sub
 
 	Sub AreaReadRequest(adr AS DWord,length As DWord)
 		Dim i aS DWord
-		ROMEnable(TRUE)
-		ReadEnable(TRUE)
-		if dir=FTE_OUTPUT Then SetDatabusDirection(FTE_INPUT)
+		SetDatabusDirection(FTE_INPUT)
 
+		ReadEnable(FALSE)
 		Do
+
 			SetAddress(adr+i)
+			ReadEnable(TRUE)
+	'		ReadEnable(FALSE)
+	'		ReadEnable(TRUE)
+			ft->addCommand(ex"\x9c\x33\x00",3)				'Wait 13us
+	
+	'		ft->gpio->ACBusReadRequest()
+	'		ft->gpio->ACBusReadRequest()
 			ft->gpio->ACBusReadRequest()
+			ReadEnable(FALSE)
 			i++
 			if length<=i Then ExitDo
+			if (i Mod 128) = 0 Then ft->addCommand(ex"\x9c\x36\x00",3)
 		Loop
 	End Sub
 
@@ -124,7 +137,7 @@ Public
 	
 	Virtual Sub WriteByte(data AS Byte)
 
-Private
+protected
 
 	Sub SetLatch(val AS Byte)
 		ft->gpio->setADBusBit(FT_EPROM_LATCH_PIN,1)		'LATCH START
@@ -135,6 +148,7 @@ Private
 	End Sub
 	
 	Sub SetDatabusDirection(idr AS FT_EPROM_IO)
+		if dir=idr Then  ExitSub
 		dir=idr
 		if idr=FTE_INPUT Then
 			ft->gpio->setACBusDir(FT_EPROM_READ)
@@ -183,8 +197,8 @@ Public
 		free(checkBuf)
 	End Function
 	
+	'このルーチンには一切のムダがないのでいじらないこと（20190905現ざう）
 	Sub WriteByte(data AS Byte)
-		ROMEnable(FALSE)
 		ReadEnable(FALSE)
 
 		'PROGRAM
@@ -203,8 +217,7 @@ Public
 
 		SetData(&HFF)'次のデータで誤らないように	
 
-		
-		ROMEnable(TRUE)
+		SetDatabusDirection(FTE_INPUT)
 		ReadEnable(TRUE)
 		ft->addCommand(ex"\x9c\x09\x00",3)
 	End Sub

@@ -6,8 +6,8 @@ Const DMG_HEADER_ADDRESS = &H0100
 Const DMG_ADDRESS_BANK0 = &H0000
 Const DMG_ADDRESS_BANKn = &H4000
 const DMG_BANK_SIZE = 16*1024
-Const DMG_MBC_ROM_BANK_NUMBER = &H2000
-Const DMG_MBC_ROM_BANK_NUMBER_HIBYTE = &H3000
+Const MBC_ADR_ROM_BANK_NUMBER = &H2000
+Const MBC_ADR_ROM_BANK_NUMBER_HIBYTE = &H3000
 
 Type Align(1) DMG_ROM_HEADER 
 	EntryPoint AS DWord	'0100h
@@ -61,6 +61,7 @@ Enum DMG_MBC_TYPE
 	DMG_TAMA5
 	DMG_HuC3
 	DMG_HuC1
+	DMG_GMMC1
 	DMG_MBC_TYPE_MAX
 	DMG_MBC_TYPE_UNKNOWN
 End Enum
@@ -79,9 +80,141 @@ Dim DMG_MBC_TYPE_STR[DMG_MBC_TYPE_MAX+1] = [
 	"DMG_TAMA5",
 	"DMG_HuC3",
 	"DMG_HuC1",
+	"DMG_G-MMC1(MX15002)",
 	"MBC BUG",
 	"MBC Unknown"
 ] AS BytePtr
+
+'-----------------------------
+' Memory Bank Controller util
+'-----------------------------
+
+'4000h-7FFFhのROMバンクをセットする
+Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
+
+	if mbc=DMG_MBC2 or mbc=DMG_GMMC1 Then
+		MBC_RegisterWrite(fe, &H2100, bankNum)
+	Else
+		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER, bankNum)
+	End If
+
+	printf("[MBC][%x]",bankNum And &HFF)
+	
+	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7)  Then
+		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER_HIBYTE, (bankNum>>8))
+		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
+	Endif
+End Sub
+
+Const MBC_ADR_SRAM_BANK_NUMBER = &H4000
+Const MBC_ADR_SRAM_ENABLE = &H0000
+Const MBC1_ADR_MODE_SELECT = &H6000
+
+'A000h-BFFFhのSRAMバンクをセットする
+Sub MBC_SramBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
+	if mbc<>DMG_MBC2 Then
+		MBC_RegisterWrite(fe, MBC_ADR_SRAM_BANK_NUMBER, bankNum)
+	End If
+	printf("[MBC][SRAM][%x]",bankNum And &HFF)
+End Sub
+
+Sub MBC_RamEnable(fe As *FT232H_DMGROM, mbc AS Long, ef AS BOOL)
+	if mbc=DMG_MBC1 or mbc=DMG_HuC1 Then
+		if ef Then		
+			MBC_RegisterWrite(fe, MBC1_ADR_MODE_SELECT, &H01)'RAM Banking Mode
+			printf("[MBC1][SRAM_BANKING_MODE]")
+		Else
+			MBC_RegisterWrite(fe, MBC1_ADR_MODE_SELECT, &H00)'ROM Banking Mode
+			printf("[MBC1][ROM_BANKING_MODE]")
+		End If
+	End If
+
+	if ef Then
+		MBC_RegisterWrite(fe, MBC_ADR_SRAM_ENABLE, &H0A) 'read/write Enable
+	Else
+		MBC_RegisterWrite(fe, MBC_ADR_SRAM_ENABLE, &H00) 'read/write Enable
+	End If
+
+
+End Sub
+
+Sub MBC_RegisterWrite(fe AS *FT232H_DMGROM, Address AS DWord,val AS Byte)
+	fe->ROMEnable(FALSE)
+	fe->SetAddress(Address)
+	fe->WriteByte( val)
+	fe->ROMEnable(TRUE)
+End Sub
+
+Sub GBMC_RegisterWrite(fe AS *FT232H_DMGROM, Address AS DWord,val AS Byte)
+'	fe->ROMEnable(FALSE)
+	fe->SetAddress(Address)
+	fe->WriteByte( val)
+'	fe->ROMEnable(TRUE)
+End Sub
+
+Const MBC2_SRAM_SIZE = 512
+Sub DMG_MBC2_SRAM_4to8(buf AS BytePtr)
+	Dim tmp AS BytePtr
+	tmp=calloc(MBC2_SRAM_SIZE)
+	memcpy(tmp,buf,MBC2_SRAM_SIZE)
+
+	dim i AS Long
+	For i=0 To MBC2_SRAM_SIZE/2
+		buf[i] = (tmp[i*2] And &H0F) or ((tmp[i+2] And &H0F)<<4 )
+	Next i
+End Sub
+
+
+'-------------------------
+' High Level Functions
+'-------------------------
+
+Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
+	Dim buf AS BytePtr
+	buf = calloc(info->RomSize)
+
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE)
+
+	dim i AS Long,bankCount As Long
+	bankCount=info->RomSize / DMG_BANK_SIZE -1
+	For i=1 To bankCount
+		printf(ex"[ROM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		MBC_RomBankSet(fe,info->MBCType,i)
+		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE)
+	Next
+	RomDumpFull=buf
+End Function
+
+Const DMG_SRAM_BANK_SIZE = &H2000
+Const DMG_SRAM_ADDRESS   = &HA000
+Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
+	Dim buf AS BytePtr
+	if info->SramSize > DMG_SRAM_BANK_SIZE Then
+		buf = calloc(info->SramSize)
+	Else
+		buf = calloc(DMG_SRAM_BANK_SIZE)
+	End If
+
+	MBC_RamEnable(fe,info->MBCType,TRUE)
+
+	dim i AS Long,bankCount As Long
+	bankCount=Abs(info->SramSize / DMG_SRAM_BANK_SIZE-1)
+	For i=0 To bankCount
+		printf(ex"[SRAM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		MBC_SramBankSet(fe,info->MBCType,i)
+		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE)
+	Next
+
+	MBC_RamEnable(fe,info->MBCType,FALSE)
+
+	if info->MBCType=DMG_MBC2 Then
+'		DMG_MBC2_SRAM_4to8(buf)
+	End If
+
+	SramDumpFull=buf
+
+End Function
+
 
 '-----------------------
 ' ROM HEADER UTILs
@@ -112,7 +245,8 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	info.Title[15]=0
 
 	'タイトルが16文字より少ない場合、ゲームIDがタイトルの後ろの方に書かれていることがある。
-	if info.Title[10]=&H00 Then	memcpy(info.GameCode,VarPtr(info.Title[11]),4)
+	if info.Title[10]=&H00 or info.Title[10]=&H20 Then _
+		memcpy(info.GameCode,VarPtr(info.Title[11]),4)
 
 	If rawHeader.GBCFlag = &HC0 Then
 		info.ConsoleFlag = DMG_CF_GBC	'GBC専用
@@ -163,6 +297,10 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 
 	Else
 		mt=DMG_MBC_TYPE_UNKNOWN
+	End If
+
+	if lstrcmp(info.GameCode,"MENU") = 0 Then
+		mt=DMG_GMMC1
 	End If
 
 	info.MBCType=mt
@@ -246,50 +384,5 @@ Function DMG_CalcSum(rom AS BytePtr,Length AS Long) As Word
 End Function
 
 
-'-----------------------------
-' Memory Bank Controller util
-'-----------------------------
-
-'4000h-7FFFhのROMバンクをセットする
-Sub DMG_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
-
-	if mbc=DMG_MBC2 Then
-		fe->SetAddress(&H2100 As DWord)
-	Else
-		fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER As DWord)
-	End If
-
-	fe->WriteByte(bankNum AS Byte )
-	printf("[MBC][%x]",bankNum And &HFF)
-	
-'	fe->FT_SendCommands()
-	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7) Then
-		fe->SetAddress(DMG_MBC_ROM_BANK_NUMBER_HIBYTE As DWord)
-		fe->WriteByte((bankNum>>8) AS Byte)
-		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
-	Endif
-'	fe->FT_SendCommands()
-End Sub
-
-
-'-------------------------
-' High Level Functions
-'-------------------------
-
-Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
-	Dim buf AS BytePtr
-	buf = calloc(info->RomSize)
-
-	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE)
-
-	dim i AS Long,bankCount As Long
-	bankCount=info->RomSize / DMG_BANK_SIZE -1
-	For i=1 To bankCount
-		printf(ex"[READ] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
-		DMG_RomBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE)
-	Next
-	RomDumpFull=buf
-End Function
 
 

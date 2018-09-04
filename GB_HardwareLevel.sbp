@@ -7,6 +7,7 @@ Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, L
 	readCount = Length / FTE_SECTOR_SIZE
 	lastReadSize = Length - readCount*FTE_SECTOR_SIZE
 
+	fe->ROMEnable(TRUE)
 	Dim i As Long,readOffset AS DWord
 	Do
 		if i => readCount Then ExitDo
@@ -33,6 +34,13 @@ Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWor
 	fe->AreaReadRequest(Address,Length)
 	fe->FT_SendCommands()
 	FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
+
+End Function
+
+Function FT232H_ReadByte(fe AS *FT232H_DMGROM,Address AS DWord) As Byte
+	fe->ReadDataRequest()
+	fe->FT_SendCommands()
+	fe->FT_ReceiveData(VarPtr(FT232H_ReadByte),1)
 End Function
 
 Sub flush(hFT AS HANDLE)
