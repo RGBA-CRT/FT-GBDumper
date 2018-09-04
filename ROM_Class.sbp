@@ -106,7 +106,7 @@ Public
 			ReadEnable(FALSE)				'ämé¿Ç…Ç¢ÇÈ
 			i++
 			if length<=i Then ExitDo
-			if (i Mod 128) = 0 Then ft->addCommand(ex"\x9c\x36\x00",3)
+	'		if (i Mod 128) = 0 Then ft->addCommand(ex"\x9c\x36\x00",3)
 		Loop
 	End Sub
 
