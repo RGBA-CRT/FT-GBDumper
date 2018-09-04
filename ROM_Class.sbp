@@ -101,14 +101,9 @@ Public
 
 			SetAddress(adr+i)
 			ReadEnable(TRUE)
-	'		ReadEnable(FALSE)
-	'		ReadEnable(TRUE)
-			ft->addCommand(ex"\x9c\x33\x00",3)				'Wait 13us
-	
-	'		ft->gpio->ACBusReadRequest()
-	'		ft->gpio->ACBusReadRequest()
+	'		ft->addCommand(ex"\x9c\x03\x00",3)				'Wait 13us 別になくてもいいことが判明
 			ft->gpio->ACBusReadRequest()
-			ReadEnable(FALSE)
+			ReadEnable(FALSE)				'確実にいる
 			i++
 			if length<=i Then ExitDo
 			if (i Mod 128) = 0 Then ft->addCommand(ex"\x9c\x36\x00",3)
@@ -202,24 +197,26 @@ Public
 		ReadEnable(FALSE)
 
 		'PROGRAM
-		ft->addCommand(ex"\x9c\x09\x00",3)	'Wait 
+'		ft->addCommand(ex"\x9c\x09\x00",3)	'Wait 
 		
 		SetData(data)	'SET WRITE DATA
-		ft->addCommand(ex"\x9c\x20\x00",3)	'Wait
+	'	ft->addCommand(ex"\x9c\x20\x00",3)	'Wait
 
 		WriteEnable(TRUE)
 		ft->addCommand(ex"\x9c\xf0\x00",3)	'wait 55us
 
 		WriteEnable(FALSE)
 
-		'wait 4us
-		ft->addCommand(ex"\x9c\x20\x00",3)	'wait
-
-		SetData(&HFF)'次のデータで誤らないように	
-
-		SetDatabusDirection(FTE_INPUT)
 		ReadEnable(TRUE)
-		ft->addCommand(ex"\x9c\x09\x00",3)
+		'wait 4us
+'		ft->addCommand(ex"\x9c\x20\x00",3)	'wait
+
+'		ReadEnable(TRUE)
+		SetData(&HFF)'次のデータで誤らないように	[必要]
+
+'		SetDatabusDirection(FTE_INPUT)
+'		ReadEnable(TRUE)
+'		ft->addCommand(ex"\x9c\x09\x00",3)
 	End Sub
 	
 Private
