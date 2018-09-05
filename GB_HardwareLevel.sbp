@@ -1,47 +1,94 @@
 
 
 'GBのカートリッジアクセス
-Const FTE_SECTOR_SIZE = 1024*16
-Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) AS BOOL
+Const FTE_READ_PACKET_SIZE = 1024*16
+Const FTE_WRITE_PACKET_SIZE = 1024*16
+Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL) AS BOOL
 	Dim readCount AS Long, lastReadSize AS Long
-	readCount = Length / FTE_SECTOR_SIZE
-	lastReadSize = Length - readCount*FTE_SECTOR_SIZE
+	readCount = Length / FTE_READ_PACKET_SIZE
+	lastReadSize = Length - readCount*FTE_READ_PACKET_SIZE
 
 	fe->ROMEnable(TRUE)
+	
 	Dim i As Long,readOffset AS DWord
 	Do
 		if i => readCount Then ExitDo
 
-		readOffset = i*FTE_SECTOR_SIZE
-'		printf(ex"READ %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,FTE_SECTOR_SIZE)
+		readOffset = i*FTE_READ_PACKET_SIZE
+'		printf(ex"READ %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,FTE_READ_PACKET_SIZE)
 		
-		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_SECTOR_SIZE )
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_READ_PACKET_SIZE, bRD_Pulse)
 
 		i++
 	Loop
 
 	if lastReadSize > 0 Then
-		readOffset = i*FTE_SECTOR_SIZE
+		readOffset = i*FTE_READ_PACKET_SIZE
 '		printf(ex"Last %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
-		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize )
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize , bRD_Pulse)
 	End If
-
+	fe->ROMEnable(FALSE)
+	
 	DMG_ReadCart=TRUE
 End Function
 
+Function DMG_WriteCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) AS BOOL
+	Dim WriteCount AS Long, lastWriteSize AS Long
+	WriteCount = Length / FTE_WRITE_PACKET_SIZE
+	lastWriteSize = Length - WriteCount*FTE_WRITE_PACKET_SIZE
+
+	fe->ROMEnable(TRUE)
+	
+	Dim i As Long,WriteOffset AS DWord
+	Do
+		if i => WriteCount Then ExitDo
+
+		WriteOffset = i*FTE_WRITE_PACKET_SIZE
+'		printf(ex"Write %02X:%04X +%04X\n",WriteOffset>>16,WriteOffset And &HFFFF,FTE_WRITE_PACKET_SIZE)
+		fe->AreaWirte(Address+WriteOffset, buffer+WriteOffset, FTE_WRITE_PACKET_SIZE)
+
+		i++
+	Loop
+
+	if lastWriteSize > 0 Then
+		WriteOffset = i*FTE_WRITE_PACKET_SIZE
+		fe->AreaWirte(Address+WriteOffset, buffer+WriteOffset, lastWriteSize)
+	End If
+	fe->ROMEnable(FALSE)
+	
+	DMG_WriteCart=TRUE
+End Function
+
 '[低レイヤな転送] １回の転送
-Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord) As BOOL
-	fe->AreaReadRequest(Address,Length)
+Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL) As BOOL
+	fe->AreaReadRequest(Address,Length,bRD_Pulse)
 	fe->FT_SendCommands()
 	FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
 
 End Function
 
+'1バイトRead
 Function FT232H_ReadByte(fe AS *FT232H_DMGROM,Address AS DWord) As Byte
 	fe->ReadDataRequest()
 	fe->FT_SendCommands()
 	fe->FT_ReceiveData(VarPtr(FT232H_ReadByte),1)
 End Function
+
+
+Sub MBC_RegisterWrite(fe AS *FT232H_DMGROM, Address AS DWord,val AS Byte)
+'	fe->ROMEnable(FALSE)
+	fe->SetAddress(Address)
+	fe->WriteByte( val)
+'	fe->ROMEnable(TRUE)
+End Sub
+
+
+Sub GBMC_RegisterWrite(fe AS *FT232H_DMGROM, Address AS DWord,val AS Byte)
+'	fe->ROMEnable(FALSE)
+	fe->SetAddress(Address)
+	fe->WriteByte( val)
+'	fe->ROMEnable(TRUE)
+End Sub
 
 Sub flush(hFT AS HANDLE)
 	Dim ftStatus As Long,bufsize As DWord,buf As BytePtr,dwAB As DWord

@@ -92,21 +92,28 @@ Public
 		ReadEnable(FALSE)
 	End Sub
 
-	Sub AreaReadRequest(adr AS DWord,length As DWord)
+	Sub AreaReadRequest(adr AS DWord,length As DWord)(bRD_pulse AS BOOL)
 		Dim i aS DWord
 		SetDatabusDirection(FTE_INPUT)
 
-		ReadEnable(FALSE)
+		if bRD_pulse Then 
+			ReadEnable(FALSE)
+		Else
+			ReadEnable(TRUE)
+		End If
+
 		Do
 
 			SetAddress(adr+i)
-			ReadEnable(TRUE)
-	'		ft->addCommand(ex"\x9c\x03\x00",3)				'Wait 13us 別になくてもいいことが判明
+			if bRD_pulse Then ReadEnable(TRUE)
+	
+			'ft->addCommand(ex"\x9c\x03\x00",3)				'Wait 13us 別になくてもいいことが判明
 			ft->gpio->ACBusReadRequest()
-			ReadEnable(FALSE)				'確実にいる
+	
+			if bRD_pulse Then ReadEnable(FALSE)				'確実にいる
 			i++
 			if length<=i Then ExitDo
-	'		if (i Mod 128) = 0 Then ft->addCommand(ex"\x9c\x36\x00",3)
+
 		Loop
 	End Sub
 
@@ -178,7 +185,7 @@ Public
 
 		'書き込みチェック
 		checkBuf = calloc(length+5)
-		fe->AreaReadRequest(adr,length)
+		AreaReadRequest(adr,length)
 		ft->sendCommands()
 		ft->reciveData(checkBuf,length)
 

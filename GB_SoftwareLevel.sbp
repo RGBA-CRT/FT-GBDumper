@@ -98,11 +98,11 @@ Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER, bankNum)
 	End If
 
-	printf("[MBC][%x]",bankNum And &HFF)
+'	printf("[MBC][%x]",bankNum And &HFF)
 	
 	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7)  Then
 		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER_HIBYTE, (bankNum>>8))
-		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
+'		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
 	Endif
 End Sub
 
@@ -138,20 +138,6 @@ Sub MBC_RamEnable(fe As *FT232H_DMGROM, mbc AS Long, ef AS BOOL)
 
 End Sub
 
-Sub MBC_RegisterWrite(fe AS *FT232H_DMGROM, Address AS DWord,val AS Byte)
-'	fe->ROMEnable(FALSE)
-	fe->SetAddress(Address)
-	fe->WriteByte( val)
-'	fe->ROMEnable(TRUE)
-End Sub
-
-Sub GBMC_RegisterWrite(fe AS *FT232H_DMGROM, Address AS DWord,val AS Byte)
-'	fe->ROMEnable(FALSE)
-	fe->SetAddress(Address)
-	fe->WriteByte( val)
-'	fe->ROMEnable(TRUE)
-End Sub
-
 Const MBC2_SRAM_SIZE = 512
 Sub DMG_MBC2_SRAM_4to8(buf AS BytePtr)
 	Dim tmp AS BytePtr
@@ -170,17 +156,20 @@ End Sub
 '-------------------------
 
 Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
+	dim bRD_Pulse AS BOOL
+	if info->MBCType= DMG_GMMC1 Then	bRD_Pulse=TRUE:printf(ex"[NintendoPower] RD Pulse Enabled\n")
+
 	Dim buf AS BytePtr
 	buf = calloc(info->RomSize)
 
-	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE)
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE,bRD_Pulse)
 
 	dim i AS Long,bankCount As Long
 	bankCount=info->RomSize / DMG_BANK_SIZE -1
 	For i=1 To bankCount
 		printf(ex"[ROM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
 		MBC_RomBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE)
+		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse)
 	Next
 	RomDumpFull=buf
 End Function
@@ -215,6 +204,21 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
 
 End Function
 
+Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
+	MBC_RamEnable(fe,info->MBCType,TRUE)
+
+	dim i AS Long,bankCount As Long
+	bankCount=Abs(info->SramSize / DMG_SRAM_BANK_SIZE-1)
+	For i=0 To bankCount
+		printf(ex"[WriteSRAM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		MBC_SramBankSet(fe,info->MBCType,i)
+		DMG_WriteCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE)
+	Next
+
+	MBC_RamEnable(fe,info->MBCType,FALSE)
+
+End Function
+
 
 '-----------------------
 ' ROM HEADER UTILs
@@ -238,7 +242,6 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 		info.bLogoCheck=TRUE
 	Else
 		info.bLogoCheck=FALSE
-		printf("LogoCheck NG")
 	End If
 
 	memcpy(info.Title,rawHeader.Title,15)
@@ -304,7 +307,7 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	End If
 
 	info.MBCType=mt
-	printf(ex"%02X ::: %s\n",ct,DMG_MBC_TYPE_STR[mt])
+'	printf(ex"%02X ::: %s\n",ct,DMG_MBC_TYPE_STR[mt])
 
 	'54h ::: (50h --> 8Mbit) + (04h --> 4Mbit) = 12Mbit = 1.5MB
 	info.RomSize = (&H8000 << (rawHeader.RomSize And &H0F))
@@ -333,7 +336,6 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 		info.RomVersion = info.RomVersion - &H30
 	End If
 	
-	printf(DMG_GenerateInfoText(info))
 
 End Sub
 

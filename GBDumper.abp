@@ -21,14 +21,11 @@ Main()
 
 Sub Main()
 
-	Print "FT232H-EPROM-PROGRAMMER Test Program - RGBA_CRT 2017 v1.1"
-	Print
-	Print "Please use at your own risk!"
+	Print "FT232H-GB-DUMPER WIP   RGBA_CRT 2018"
 	Print 
 	Dim ft AS *FT232H
 
 	ft=new FT232H(FT_COMMAND_BUFFER_SIZE)
-	printf("ft=%X",ft)
 	if ft->listupDeviceToConsole()=FALSE Then Input "[PRESS ENTER]",ft:End
 
 	Dim ftID As DWord
@@ -41,48 +38,45 @@ Sub Main()
 	Dim fe AS *FT232H_DMGROM
 	fe=New FT232H_DMGROM(ft)
 
-	Dim c AS Long
+	Dim c AS Long, filename AS String
 	Do
 		Dim header AS DMG_ROM_HEADER
 		DMG_GetHeader(fe,VarPtr(header))
 		Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
 
-		Dim info AS DMG_ROM_INFO
+		Dim info AS DMG_ROM_INFO,infostr AS BytePtr
 		DMG_rawHeaderToInfo(header,info)
-		
-		input ex"\n1.Dump ROM 2.Dump SRAM\n> ",c
+		infostr=DMG_GenerateInfoText(info)
+		printf(infostr)	: free(infostr) : infostr=NULL
+
+		if info.bLogoCheck=FALSE Then
+			printWarning(ex"[Warning] 接触不良\n")
+		End If
+			
+		input ex"\n1.Dump ROM  2.Dump SRAM  5.GBMemory Dump  6.Write SRAM\n> ",c
 
 		DMG_GetHeader(fe,VarPtr(header))
 		DMG_rawHeaderToInfo(header,info)
-	/*	info.RomSize= (128*1024) AS DWord
-		lstrcpy(info.Title,"test.bin")
-		info.MBCType=DMG_MBC5
-*/
 		ft->flush()
+	
 		if c=1 Then
 			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
 		Elseif c=2 Then
 			DumpSramToFile(fe,sprintfStr("%s.sav",info.Title),info)
-		else if c=4 Then
-			GBMC_RegisterWrite(fe, &H0120, &H09)
-			GBMC_RegisterWrite(fe, &H0121, &Haa)
-			GBMC_RegisterWrite(fe, &H0122, &H55)
-			GBMC_RegisterWrite(fe, &H013f, &Ha5)
+		Elseif c=6 Then
+			Input "FileName(.sav) > ",filename
+			WriteSramToFile(fe,filename,info)
+		else if c=5 Then			
+			printf("GB Memory Setup: ")
+			if GBMC_MapEntire(fe) = TRUE Then
+				printf(ex"successful\n")
+			Else
+				printf(ex"failed\n")
+			End If
 
-
-			GBMC_RegisterWrite(fe, &H0120, &H05)
-			GBMC_RegisterWrite(fe, &H013f, &Ha5)
-
-			GBMC_RegisterWrite(fe, &H0120, &H10)
-			GBMC_RegisterWrite(fe, &H013f, &Ha5)
-
-			printf(ex"npchk=%x\n",FT232H_ReadByte(fe,&H013f))
-
-			GBMC_RegisterWrite(fe, &H0120, &H11)
-			GBMC_RegisterWrite(fe, &H013f, &Ha5)
-
-			GBMC_RegisterWrite(fe, &H0120, &H08)
-			GBMC_RegisterWrite(fe, &H013f, &Ha5)
+			info.RomSize=1024*1024
+			info.MBCType=DMG_GMMC1
+			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
 
 		else if c=3 Then
 
@@ -96,15 +90,52 @@ Sub Main()
 			MBC_RamEnable(fe,DMG_MBC2,FALSE)
 		End If
 		ft->flush()
+
+		printf(ex"\n\n")
 	Loop
 debug
 	Sleep(-1)
 End Sub
 
+'参考
+'https://github.com/n13i/writeboy/blob/master/WriteBoy/cart_type.ino
+'https://forums.nesdev.com/viewtopic.php?f=12&t=11453&start=147
+Function GBMC_MapEntire(fe AS *FT232H_DMGROM) AS BOOL
+	'G-MMC Opreation Mode
+	GBMC_RegisterWrite(fe, &H0120, &H09)
+	GBMC_RegisterWrite(fe, &H0121, &Haa)
+	GBMC_RegisterWrite(fe, &H0122, &H55)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
+	'05h = Map "MENU PROGRAM", 04h = カセット全体をマップ
+	GBMC_RegisterWrite(fe, &H0120, &H04)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+/*
+	GBMC_RegisterWrite(fe, &H0120, &H10)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+*/
+	'0xA5
+	if FT232H_ReadByte(fe,&H013f) = &HA5 Then
+		GBMC_MapEntire=TRUE
+	Else
+		GBMC_MapEntire=FALSE
+	End If
+
+/*
+	GBMC_RegisterWrite(fe, &H0120, &H11)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+*/
+	'G-MMC Operation Mode End
+	GBMC_RegisterWrite(fe, &H0120, &H08)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+End Function
+
 
 Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
 
-	Dim buf AS BytePtr,lt As DWord
+	Dim buf AS BytePtr,lt As DWord, retry AS DWord
+
+*DFRTF_DUMP_START
 	lt=GetTickCount()
 	buf=RomDumpFull(fe,VarPtr(info))
 	lt=GetTickCount() - lt
@@ -112,7 +143,18 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 
 	Dim actualSum As DWord
 	actualSum = DMG_CalcSum(buf,info.RomSize)
-	printf(ex"calcurated sum: %04X %04X\n",actualSum,info.raw.CheckSum)
+	printf(ex"Calculate sum: %04X %04X ... ",actualSum,info.raw.CheckSum)
+	if actualSum = info.raw.CheckSum Then
+		printSuccessful(ex"[ OK ]\n")
+	Else
+		printWarning(ex"[ NG ]\n")
+		if info.MBCType=DMG_GMMC1 And retry=0 Then 
+			printf(ex"NP RETRY...\n\n")
+			retry++
+			Goto *DFRTF_DUMP_START
+		End If
+	End If
+
 
 	Dim fout AS File
 	fout.openFile(filename,GENERIC_WRITE)
@@ -138,4 +180,32 @@ Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS D
 End Function
 
 
+Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
+
+	Dim buf AS BytePtr
+	Dim fout AS File
+	fout.openFile(filename,GENERIC_READ)
+	buf=calloc(info.SramSize)
+	fout.read(buf,info.SramSize)
+	fout.close()
+
+	SramWrite(fe,buf,VarPtr(info))
+
+	free(buf): buf=NULL
+
+End Function
+
+
 '-----------------------------------------------------------------------------------------
+
+Sub printWarning(str AS BytePtr)
+	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), &H000C )
+	PrintPtr(str)
+	SetConsoleColor(CC_DEFAULT)
+End Sub
+
+Sub printSuccessful(str AS BytePtr)
+	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), &H000A )
+	PrintPtr(str)
+	SetConsoleColor(CC_DEFAULT)
+End Sub
