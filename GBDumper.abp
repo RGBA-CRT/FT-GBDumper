@@ -1,6 +1,5 @@
 /* FT232HL GB Dumper
- * connection:
- *  Œã‚Å‘‚­
+ * 	Programmed by RGBA_CRT 2018 09
  */
 
 'AB-FT232HLib
@@ -79,15 +78,27 @@ Sub Main()
 			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
 
 		else if c=3 Then
-
+			'MBC2 SRAM READ TEST
+			ft->flush()
+			fe->ROMEnable(TRUE)
 			Dim buf[512] AS byte
+
+			'sanni‚Ì“äC³@-> Œø‰Ê‚È‚µ
+			FT232H_ReadEPROM(fe,buf,&H0134,4,TRUE)
+
 			MBC_RamEnable(fe,DMG_MBC2,TRUE)
-	
-	'		fe->ROMEnable(FALSE)	
-			FT232H_ReadEPROM(fe,buf,&HA100,512)
+		
+			FT232H_ReadEPROM(fe,buf,&HA000,512,TRUE)
 			Dump(buf,512)
 			fe->ROMEnable(TRUE)
 			MBC_RamEnable(fe,DMG_MBC2,FALSE)
+			fe->FT_SendCommands()
+			
+		'	DMG_MBC2_SRAM_4to8(buf)
+			Dim test AS File 
+			test.openFile("mbc2.sav",GENERIC_WRITE)
+			test.write(buf,512)
+			test.close() 
 		End If
 		ft->flush()
 
@@ -143,7 +154,7 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 
 	Dim actualSum As DWord
 	actualSum = DMG_CalcSum(buf,info.RomSize)
-	printf(ex"Calculated sum: %04X %04X ... ",actualSum,info.raw.CheckSum)
+	printf(ex"Checksum: \n [Actual] 0x%04X\n [Header] 0x%04X ... ",actualSum,info.raw.CheckSum)
 	if actualSum = info.raw.CheckSum Then
 		printSuccessful(ex"[ OK ]\n")
 	Else
@@ -170,6 +181,10 @@ Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS D
 	Dim buf AS BytePtr
 	buf=SramDumpFull(fe,VarPtr(info))
 
+	if info.MBCType=DMG_MBC2 Then
+		info.SramSize=512
+	End If
+
 	Dim fout AS File
 	fout.openFile(filename,GENERIC_WRITE)
 	fout.write(buf,info.SramSize)
@@ -195,6 +210,14 @@ Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS 
 
 End Function
 
+Function CheckCancel() AS BOOL
+	if GetKeyState(VK_ESCAPE) And &H80 Then 
+		CheckCancel=TRUE
+		printf(ex"\n>>>>>>> Cancelled by user.\n\n")
+	Else
+		CheckCancel=FALSE
+	End If
+End Function
 
 '-----------------------------------------------------------------------------------------
 

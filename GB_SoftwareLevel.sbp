@@ -170,6 +170,8 @@ Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
 		printf(ex"[ROM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
 		MBC_RomBankSet(fe,info->MBCType,i)
 		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse)
+
+		if CheckCancel() Then ExitFor
 	Next
 	RomDumpFull=buf
 End Function
@@ -191,13 +193,15 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
 	For i=0 To bankCount
 		printf(ex"[SRAM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE)
+		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE,TRUE)
+
+		if CheckCancel() Then ExitFor
 	Next
 
 	MBC_RamEnable(fe,info->MBCType,FALSE)
 
 	if info->MBCType=DMG_MBC2 Then
-'		DMG_MBC2_SRAM_4to8(buf)
+	'	DMG_MBC2_SRAM_4to8(buf)
 	End If
 
 	SramDumpFull=buf
@@ -213,6 +217,8 @@ Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 		printf(ex"[WriteSRAM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
 		DMG_WriteCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE)
+
+		if CheckCancel() Then ExitFor
 	Next
 
 	MBC_RamEnable(fe,info->MBCType,FALSE)
