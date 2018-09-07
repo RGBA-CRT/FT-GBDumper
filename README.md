@@ -29,8 +29,18 @@ GB Cartridge Dumper using FT232HL
 + [GB] RST <==== VCC
 
 ## 使い方 / usage
-+ exeを実行
-+ execute exe
+1. exeを実行
+1. カセットを挿す
+1. Enterキーを押してヘッダを確認する
+   + 接触不良というメッセージが出たら出なくなるまで試行錯誤する
+1. 実行したい操作の番号を入力
+------------
+1. Execute exe
+1. Insert cartridge
+1. Press enter key and check ROM header
+   ++ If appear message [Contact Failure], cleanup connector and press Enter.
+1. Input number of operation.  
+
 
 ## 参考 / technical reference
 + http://gbdev.gg8.se/wiki/articles/The_Cartridge_Header
