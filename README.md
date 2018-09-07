@@ -50,3 +50,6 @@ GB Cartridge Dumper using FT232HL
 + https://github.com/n13i/writeboy
 + https://forums.nesdev.com/viewtopic.php?f=12&t=11453&start=147
 + Thank you.
+
+## SS
+![ScreeenShot](https://user-images.githubusercontent.com/19349443/45218101-58ae3e00-b2e1-11e8-8570-d32ac8b97ccd.png)
