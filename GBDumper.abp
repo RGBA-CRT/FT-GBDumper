@@ -15,12 +15,12 @@
 
 
 
-Const FT_COMMAND_BUFFER_SIZE = 700*1024 ' 1MB
+Const FT_COMMAND_BUFFER_SIZE = 700*1024 
 Main()
 
 Sub Main()
 
-	Print "FT232H-GB-DUMPER WIP   RGBA_CRT 2018"
+	Print "FT232H-GB-DUMPER v0.0      RGBA_CRT 2018"
 	Print 
 	Dim ft AS *FT232H
 
@@ -28,10 +28,10 @@ Sub Main()
 	if ft->listupDeviceToConsole()=FALSE Then Input "[PRESS ENTER]",ft:End
 
 	Dim ftID As DWord
-	'input "Select device >",ftID
+	if ft->getNumberOfDevice() > 1 Then input "Select device >",ftID
 
 	if ft->openDevice(ftID)=FALSE Then Print "OpenError" : End
-	printf(ex"device #%02d open ok.\n\n",ftID)
+	printf(ex"device #%02d online.\n\n",ftID)
 
 
 	Dim fe AS *FT232H_DMGROM
@@ -89,7 +89,7 @@ Sub Main()
 			MBC_RamEnable(fe,DMG_MBC2,TRUE)
 		
 			FT232H_ReadEPROM(fe,buf,&HA000,512,TRUE)
-			Dump(buf,512)
+			Dump(buf,128)
 			fe->ROMEnable(TRUE)
 			MBC_RamEnable(fe,DMG_MBC2,FALSE)
 			fe->FT_SendCommands()
@@ -103,6 +103,8 @@ Sub Main()
 		ft->flush()
 
 		printf(ex"\n\n")
+		
+		if c<>0 Then Input "[PRESS ENTER]",c
 	Loop
 debug
 	Sleep(-1)
@@ -178,6 +180,12 @@ End Function
 
 Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
 
+	Dim fout AS File
+	if fout.openFile(filename,GENERIC_WRITE)=FALSE Then
+		printf(ex"File open error : %s\n",filename)
+		exitfunction
+	End If
+
 	Dim buf AS BytePtr
 	buf=SramDumpFull(fe,VarPtr(info))
 
@@ -185,12 +193,12 @@ Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS D
 		info.SramSize=512
 	End If
 
-	Dim fout AS File
-	fout.openFile(filename,GENERIC_WRITE)
+
 	fout.write(buf,info.SramSize)
 	fout.close()
 
 	free(buf): buf=NULL
+	DumpSramToFile=TRUE
 
 End Function
 
@@ -199,8 +207,17 @@ Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS 
 
 	Dim buf AS BytePtr
 	Dim fout AS File
-	fout.openFile(filename,GENERIC_READ)
-	buf=calloc(info.SramSize)
+	if fout.openFile(filename,GENERIC_READ)=FALSE Then
+		printf(ex"File open error : %s\n",filename)
+		exitfunction
+	End If
+
+	if info.SramSize < DMG_SRAM_BANK_SIZE Then
+		buf=calloc(DMG_SRAM_BANK_SIZE)
+	Else
+		buf=calloc(info.SramSize)
+	End If
+
 	fout.read(buf,info.SramSize)
 	fout.close()
 
