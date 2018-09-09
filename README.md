@@ -29,12 +29,14 @@ GB Cartridge Dumper using FT232HL
 + [GB] RST <==== VCC
 
 ## 使い方 / usage
+1. FT232Hに[D2XXドライバをインストール](http://www.ftdichip.com/Drivers/D2XX.htm)
 1. exeを実行
 1. カセットを挿す
 1. Enterキーを押してROM情報を確認する
    + 接触不良というメッセージが出たら出なくなるまで試行錯誤する
 1. 実行したい操作の番号を入力
 ------------
+1. [Install FTDI D2XX driver](http://www.ftdichip.com/Drivers/D2XX.htm) to FT232H
 1. Execute exe
 1. Insert cartridge
 1. Press enter key and check ROM header
