@@ -119,7 +119,7 @@ Public
 
 	Sub WriteEnable(ef AS BOOL)
 		if bWriteEnable <> ef Then
-			ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,(ef) AND &H01)
+			ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,not(ef) AND &H01)
 			if ef=FALSE Then
 				SetDatabusDirection(FTE_INPUT)
 			Else
