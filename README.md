@@ -28,6 +28,9 @@ GB Cartridge Dumper using FT232HL
 + [MCP23S17] GPB ====> Address 8-15
 + [GB] RST <==== VCC
 
+回路図を[@YoutechA320U](https://twitter.com/YoutechA320U)さんから頂いたので掲載いたします。  
+![Circuit](https://raw.githubusercontent.com/RGBA-CRT/FT-GBDumper/master/Circuit.png)
+
 ## 使い方 / usage
 1. FT232Hに[D2XXドライバをインストール](http://www.ftdichip.com/Drivers/D2XX.htm)
 1. exeを実行
