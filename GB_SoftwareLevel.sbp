@@ -85,77 +85,103 @@ Dim DMG_MBC_TYPE_STR[DMG_MBC_TYPE_MAX+1] = [
 	"MBC Unknown"
 ] AS BytePtr
 
-'-----------------------------
-' Memory Bank Controller util
-'-----------------------------
-
-'4000h-7FFFhのROMバンクをセットする
-Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
-
-	if mbc=DMG_MBC2 or mbc=DMG_GMMC1 Then
-		MBC_RegisterWrite(fe, &H2100, bankNum)
-	Else
-		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER, bankNum)
-	End If
-
-'	printf("[MBC][%x]",bankNum And &HFF)
-	
-	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7)  Then
-		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER_HIBYTE, (bankNum>>8))
-'		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
-	Endif
-End Sub
-
 Const MBC_ADR_SRAM_BANK_NUMBER = &H4000
 Const MBC_ADR_SRAM_ENABLE = &H0000
 Const MBC1_ADR_MODE_SELECT = &H6000
 
-'A000h-BFFFhのSRAMバンクをセットする
-Sub MBC_SramBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
-	if mbc<>DMG_MBC2 Then
-		MBC_RegisterWrite(fe, MBC_ADR_SRAM_BANK_NUMBER, bankNum)
-	End If
-	printf("[MBC][SRAM][%x]",bankNum And &HFF)
-End Sub
+'-------------------------
+' High Level Functions
+'-------------------------
 
-Sub MBC_RamEnable(fe As *FT232H_DMGROM, mbc AS Long, ef AS BOOL)
-	if mbc=DMG_MBC1 or mbc=DMG_HuC1 Then
-		if ef Then		
-			MBC_RegisterWrite(fe, MBC1_ADR_MODE_SELECT, &H01)'RAM Banking Mode
-			printf("[MBC1][SRAM_BANKING_MODE]")
-		Else
-			MBC_RegisterWrite(fe, MBC1_ADR_MODE_SELECT, &H00)'ROM Banking Mode
-			printf("[MBC1][ROM_BANKING_MODE]")
+Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
+
+	Dim buf AS BytePtr,lt As DWord, retry AS DWord
+
+*DFRTF_DUMP_START
+	lt=GetTickCount()
+	buf=RomDumpFull(fe,VarPtr(info))
+	lt=GetTickCount() - lt
+	printf(ex"\nProcess Time : %dms %ds\n",lt,lt/1000)
+
+	Dim actualSum As DWord
+	actualSum = DMG_CalcSum(buf,info.RomSize)
+	printf(ex"Checksum: \n [Actual] 0x%04X\n [Header] 0x%04X ... ",actualSum,info.raw.CheckSum)
+	if actualSum = info.raw.CheckSum Then
+		printSuccessful(ex"[ OK ]\n")
+	Else
+		printWarning(ex"[ NG ]\n")
+		if info.MBCType=DMG_GMMC1 And retry=0 Then 
+			printf(ex"NP RETRY...\n\n")
+			retry++
+			Goto *DFRTF_DUMP_START
 		End If
 	End If
 
-	if ef Then
-		MBC_RegisterWrite(fe, MBC_ADR_SRAM_ENABLE, &H0A) 'read/write Enable
-	Else
-		MBC_RegisterWrite(fe, MBC_ADR_SRAM_ENABLE, &H00) 'read/write Enable
+
+	Dim fout AS File
+	fout.openFile(filename,GENERIC_WRITE)
+	fout.write(buf,info.RomSize)
+	fout.close()
+
+	free(buf): buf=NULL
+
+End Function
+
+Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
+
+	Dim fout AS File
+	if fout.openFile(filename,GENERIC_WRITE)=FALSE Then
+		printf(ex"File open error : %s\n",filename)
+		exitfunction
+	End If
+
+	Dim buf AS BytePtr
+	buf=SramDumpFull(fe,VarPtr(info))
+
+	if info.MBCType=DMG_MBC2 Then
+		info.SramSize=512
 	End If
 
 
-End Sub
+	fout.write(buf,info.SramSize)
+	fout.close()
 
-Const MBC2_SRAM_SIZE = 512
-Sub DMG_MBC2_SRAM_4to8(buf AS BytePtr)
-	Dim tmp AS BytePtr
-	tmp=calloc(MBC2_SRAM_SIZE)
-	memcpy(tmp,buf,MBC2_SRAM_SIZE)
+	free(buf): buf=NULL
+	DumpSramToFile=TRUE
 
-	dim i AS Long
-	For i=0 To MBC2_SRAM_SIZE/2
-		buf[i] = (tmp[i*2] And &H0F) or ((tmp[i+2] And &H0F)<<4 )
-	Next i
-End Sub
+End Function
+
+
+Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
+
+	Dim buf AS BytePtr
+	Dim fout AS File
+	if fout.openFile(filename,GENERIC_READ)=FALSE Then
+		printf(ex"File open error : %s\n",filename)
+		exitfunction
+	End If
+
+	if info.SramSize < DMG_SRAM_BANK_SIZE Then
+		buf=calloc(DMG_SRAM_BANK_SIZE)
+	Else
+		buf=calloc(info.SramSize)
+	End If
+
+	fout.read(buf,info.SramSize)
+	fout.close()
+
+	SramWrite(fe,buf,VarPtr(info))
+
+	free(buf): buf=NULL
+
+End Function
 
 
 '-------------------------
 ' High Level Functions
 '-------------------------
 
-Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
+Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	dim bRD_Pulse AS BOOL
 	if info->MBCType= DMG_GMMC1 Then	bRD_Pulse=TRUE:printf(ex"[NintendoPower] RD Pulse Enabled\n")
 
@@ -178,7 +204,7 @@ End Function
 
 Const DMG_SRAM_BANK_SIZE = &H2000
 Const DMG_SRAM_ADDRESS   = &HA000
-Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO)
+Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	Dim buf AS BytePtr
 	if info->SramSize > DMG_SRAM_BANK_SIZE Then
 		buf = calloc(info->SramSize)
@@ -223,6 +249,103 @@ Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 
 	MBC_RamEnable(fe,info->MBCType,FALSE)
 
+End Function
+
+'-----------------------------
+' Memory Bank Controller util
+'-----------------------------
+
+'4000h-7FFFhのROMバンクをセットする
+Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
+
+	if mbc=DMG_MBC2 or mbc=DMG_GMMC1 Then
+		MBC_RegisterWrite(fe, &H2100, bankNum)
+	Else
+		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER, bankNum)
+	End If
+
+'	printf("[MBC][%x]",bankNum And &HFF)
+	
+	if (mbc >= DMG_MBC5) And (mbc <= DMG_MBC7)  Then
+		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER_HIBYTE, (bankNum>>8))
+'		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
+	Endif
+End Sub
+
+
+'A000h-BFFFhのSRAMバンクをセットする
+Sub MBC_SramBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
+	if mbc<>DMG_MBC2 Then
+		MBC_RegisterWrite(fe, MBC_ADR_SRAM_BANK_NUMBER, bankNum)
+	End If
+	printf("[MBC][SRAM][%x]",bankNum And &HFF)
+End Sub
+
+Sub MBC_RamEnable(fe As *FT232H_DMGROM, mbc AS Long, ef AS BOOL)
+	if mbc=DMG_MBC1 or mbc=DMG_HuC1 Then
+		if ef Then		
+			MBC_RegisterWrite(fe, MBC1_ADR_MODE_SELECT, &H01)'RAM Banking Mode
+			printf("[MBC1][SRAM_BANKING_MODE]")
+		Else
+			MBC_RegisterWrite(fe, MBC1_ADR_MODE_SELECT, &H00)'ROM Banking Mode
+			printf("[MBC1][ROM_BANKING_MODE]")
+		End If
+	End If
+
+	if ef Then
+		MBC_RegisterWrite(fe, MBC_ADR_SRAM_ENABLE, &H0A) 'read/write Enable
+	Else
+		MBC_RegisterWrite(fe, MBC_ADR_SRAM_ENABLE, &H00) 'read/write Enable
+	End If
+
+
+End Sub
+
+Const MBC2_SRAM_SIZE = 512
+Sub DMG_MBC2_SRAM_4to8(buf AS BytePtr)
+	Dim tmp AS BytePtr
+	tmp=calloc(MBC2_SRAM_SIZE)
+	memcpy(tmp,buf,MBC2_SRAM_SIZE)
+
+	dim i AS Long
+	For i=0 To MBC2_SRAM_SIZE/2
+		buf[i] = (tmp[i*2] And &H0F) or ((tmp[i+2] And &H0F)<<4 )
+	Next i
+End Sub
+
+
+
+'参考
+'https://github.com/n13i/writeboy/blob/master/WriteBoy/cart_type.ino
+'https://forums.nesdev.com/viewtopic.php?f=12&t=11453&start=147
+Function GBMC_MapEntire(fe AS *FT232H_DMGROM) AS BOOL
+	'G-MMC Opreation Mode
+	GBMC_RegisterWrite(fe, &H0120, &H09)
+	GBMC_RegisterWrite(fe, &H0121, &Haa)
+	GBMC_RegisterWrite(fe, &H0122, &H55)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
+	'05h = Map "MENU PROGRAM", 04h = カセット全体をマップ
+	GBMC_RegisterWrite(fe, &H0120, &H04)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+/*
+	GBMC_RegisterWrite(fe, &H0120, &H10)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+*/
+	'0xA5
+	if FT232H_ReadByte(fe,&H013f) = &HA5 Then
+		GBMC_MapEntire=TRUE
+	Else
+		GBMC_MapEntire=FALSE
+	End If
+
+/*
+	GBMC_RegisterWrite(fe, &H0120, &H11)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+*/
+	'G-MMC Operation Mode End
+	GBMC_RegisterWrite(fe, &H0120, &H08)
+	GBMC_RegisterWrite(fe, &H013f, &Ha5)
 End Function
 
 
