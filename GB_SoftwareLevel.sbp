@@ -261,6 +261,7 @@ Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 	MBC_RamEnable(fe,info->MBCType,FALSE)
 
 	printf(ex"\n")
+	
 End Function
 
 '-----------------------------
@@ -351,13 +352,10 @@ Function GBMC_MapEntire(fe AS *FT232H_DMGROM) AS BOOL
 		GBMC_MapEntire=FALSE
 	End If
 
-/*
-	GBMC_RegisterWrite(fe, &H0120, &H11)
-	GBMC_RegisterWrite(fe, &H013f, &Ha5)
-*/
 	'G-MMC Operation Mode End
 	GBMC_RegisterWrite(fe, &H0120, &H08)
 	GBMC_RegisterWrite(fe, &H013f, &Ha5)
+
 End Function
 
 
