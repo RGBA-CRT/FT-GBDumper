@@ -20,7 +20,7 @@ Main()
 
 Sub Main()
 
-	Print "FT232H-GB-DUMPER v0.1      RGBA_CRT 2018"
+	Print "FT232H-GB-DUMPER v0.1a      RGBA_CRT 2018"
 	Print 
 	Dim ft AS *FT232H
 

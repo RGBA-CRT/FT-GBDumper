@@ -189,17 +189,23 @@ Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	buf = calloc(info->RomSize)
 
 	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE,bRD_Pulse)
+	
+	printf(ex"\n")
 
-	dim i AS Long,bankCount As Long
+	dim i AS Long,bankCount As Long,lt AS DWord
 	bankCount=info->RomSize / DMG_BANK_SIZE -1
+	lt=GetTickCount()
 	For i=1 To bankCount
-		printf(ex"[ROM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		printf(ex"[DumpROM] Bank:%02X/%02X %d%% ::: %dkb/s         \r",i,bankCount,i/bankCount*100, ((i*DMG_BANK_SIZE)/(GetTickCount()-lt)) As DWord)
+
 		MBC_RomBankSet(fe,info->MBCType,i)
 		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse)
 
 		if CheckCancel() Then ExitFor
 	Next
 	RomDumpFull=buf
+	
+	printf(ex"\n")
 End Function
 
 Const DMG_SRAM_BANK_SIZE = &H2000
@@ -214,10 +220,12 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 
 	MBC_RamEnable(fe,info->MBCType,TRUE)
 
+	printf(ex"\n")
+
 	dim i AS Long,bankCount As Long
 	bankCount=Abs(info->SramSize / DMG_SRAM_BANK_SIZE-1)
 	For i=0 To bankCount
-		printf(ex"[SRAM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		printf(ex"[DumpSRAM] Bank:%02X/%02X %d%%  \r",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
 		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE,TRUE)
 
@@ -232,15 +240,18 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 
 	SramDumpFull=buf
 
+	printf(ex"\n")
 End Function
 
 Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 	MBC_RamEnable(fe,info->MBCType,TRUE)
 
+	printf(ex"\n")
+
 	dim i AS Long,bankCount As Long
 	bankCount=Abs(info->SramSize / DMG_SRAM_BANK_SIZE-1)
 	For i=0 To bankCount
-		printf(ex"[WriteSRAM] Bank:%02X/%02X %d%%\n",i,bankCount,i/bankCount*100)
+		printf(ex"[WriteSRAM] Bank:%02X/%02X %d%%   \r",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
 		DMG_WriteCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE)
 
@@ -249,6 +260,7 @@ Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 
 	MBC_RamEnable(fe,info->MBCType,FALSE)
 
+	printf(ex"\n")
 End Function
 
 '-----------------------------
