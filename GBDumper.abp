@@ -49,7 +49,7 @@ Sub Main()
 		printf(infostr)	: free(infostr) : infostr=NULL
 
 		if info.bLogoCheck=FALSE Then
-			printWarning(ex"[Warning] ÚG•s—Ç\n")
+			colorPrint(PH_ERROR, ex"[Warning] ÚG•s—Ç\n")
 		End If
 			
 		input ex"\n1.Dump ROM  2.Dump SRAM  5.GBMemory Dump  6.Write SRAM\n> ",c
@@ -122,14 +122,3 @@ End Function
 
 '-----------------------------------------------------------------------------------------
 
-Sub printWarning(str AS BytePtr)
-	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), &H000C )
-	PrintPtr(str)
-	SetConsoleColor(CC_DEFAULT)
-End Sub
-
-Sub printSuccessful(str AS BytePtr)
-	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), &H000A )
-	PrintPtr(str)
-	SetConsoleColor(CC_DEFAULT)
-End Sub

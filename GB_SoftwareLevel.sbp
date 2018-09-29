@@ -90,7 +90,7 @@ Const MBC_ADR_SRAM_ENABLE = &H0000
 Const MBC1_ADR_MODE_SELECT = &H6000
 
 '-------------------------
-' High Level Functions
+' Top Level Functions
 '-------------------------
 
 Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
@@ -107,9 +107,9 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 	actualSum = DMG_CalcSum(buf,info.RomSize)
 	printf(ex"Checksum: \n [Actual] 0x%04X\n [Header] 0x%04X ... ",actualSum,info.raw.CheckSum)
 	if actualSum = info.raw.CheckSum Then
-		printSuccessful(ex"[ OK ]\n")
+		colorPrint(PH_SUCCESS, ex"[ OK ]\n")
 	Else
-		printWarning(ex"[ NG ]\n")
+		colorPrint(PH_ERROR, ex"[ NG ]\n")
 		if info.MBCType=DMG_GMMC1 And retry=0 Then 
 			printf(ex"NP RETRY...\n\n")
 			retry++

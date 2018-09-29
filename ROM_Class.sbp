@@ -27,7 +27,7 @@ Public
 
 		ft->gpio->setACBusDir(&HFF)
 		ft->gpio->setADBusDir(&HF0)
-		mcp=new FT232H_MCP23017(ft,3)
+		mcp=new FT232H_MCP23017(ft,3,40)
 
 		mcp->SetPort(&H0000,&H0000)
 		SetLatch(0)
