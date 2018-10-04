@@ -4,7 +4,7 @@ GB Cartridge Dumper using FT232HL
 ## なにこれ
 + FT232H, MCP23S17を使ったGBダンパー
 + 256kb/sぐらいでる
-+ GBAへの対応も予定
++ [GBAにも対応](https://github.com/RGBA-CRT/FT-GBADumper)
 + なぜかMBC2のセーブ読み書きができない
 + GBメモリカセットの読み出しに対応(未保障)
 + セーブ消えても知りません
