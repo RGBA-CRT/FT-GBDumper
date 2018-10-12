@@ -1,5 +1,5 @@
 Const FT_EPROM_VPP_PIN = 4
-Const FT_EPROM_LATCH_PIN = 5
+Const FT_EPROM_RST_PIN = 5
 Const FT_EPROM_ENABLE_PIN = 6
 Const FT_EPROM_READ_ENABLE_PIN = 7
 Const FT_EPROM_WRITE = &HFF
@@ -39,6 +39,9 @@ Public
 		ROMEnable(TRUE)
 		ReadEnable(TRUE)
 		WriteEnable(FALSE)
+		
+		'RST
+		ft->gpio->setADBusBit(FT_EPROM_RST_PIN,1)
 
 		mcp->SetPortValWord(0)
 
@@ -142,11 +145,11 @@ Public
 protected
 
 	Sub SetLatch(val AS Byte)
-		ft->gpio->setADBusBit(FT_EPROM_LATCH_PIN,1)		'LATCH START
+		ft->gpio->setADBusBit(FT_EPROM_RST_PIN,1)		'LATCH START
 		mcp->SetPortValA(val)							'LATCH SET
 		ft->addCommand(ex"\x9c\x39\x00",3)				'Wait 13us
 		mcp->SetPortValA(val)							'LATCH SET
-		ft->gpio->setADBusBit(FT_EPROM_LATCH_PIN,0)		'LATCH HOLD
+		ft->gpio->setADBusBit(FT_EPROM_RST_PIN,0)		'LATCH HOLD
 	End Sub
 	
 	Sub SetDatabusDirection(idr AS FT_EPROM_IO)
