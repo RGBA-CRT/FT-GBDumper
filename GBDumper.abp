@@ -3,9 +3,9 @@
  */
 
 'AB-FT232HLib
-#include "..\D2XX.sbp"
-#include "..\MCP23017_Lib.sbp"
-#include "..\FT232HLib_debug.sbp"
+#include "..¥D2XX.sbp"
+#include "..¥MCP23017_Lib.sbp"
+#include "..¥FT232HLib_debug.sbp"
 'RGBALib
 #include <RGBALib.sbp>
 #include "GB_HardwareLevel.sbp"
@@ -18,9 +18,36 @@
 Const FT_COMMAND_BUFFER_SIZE = 700*1024 
 Main()
 
+Function MakeFileName(filename As BytePtr, prefix AS BytePtr, extention AS BytePtr) AS BytePtr
+	Dim buffer As BytePtr, i AS Long, p AS DWORD
+	buffer=calloc(MAX_PATH)
+	
+	if prefix<>NULL Then
+		pstrcat(buffer,prefix,p)
+	endif
+
+	pstrcat(buffer,filename,p)
+	
+
+	if extention<>NULL Then
+		pstrcat(buffer,extention,p)
+	endif
+
+	'ファイル名に使えない文字を削除(とりあえず日本語非対応)
+	For i=0 to p-1	
+		if buffer[i] < &H20 Then
+			buffer[i] = GetByte(" ")
+		End If
+	Next i
+	MakeFileName=calloc(p+1)
+	lstrcpy(MakeFileName,buffer)
+	free(buffer) : buffer=NULL
+
+End Function
+
 Sub Main()
 
-	Print "FT232H-GB-DUMPER v0.1a dbg      RGBA_CRT 2018"
+	Print "FT232H-GB-DUMPER v0.2 dbg      RGBA_CRT 2018"
 	Print 
 	Dim ft AS *FT232H
 
@@ -31,7 +58,7 @@ Sub Main()
 	if ft->getNumberOfDevice() > 1 Then input "Select device >",ftID
 
 	if ft->openDevice(ftID)=FALSE Then Print "OpenError" : End
-	printf(ex"device #%02d online.\n\n",ftID)
+	printf(ex"device #%02d online.¥n¥n",ftID)
 
 
 	Dim fe AS *FT232H_DMGROM
@@ -41,7 +68,7 @@ Sub Main()
 	Do
 		Dim header AS DMG_ROM_HEADER
 		DMG_GetHeader(fe,VarPtr(header))
-		Dump(VarPtr(header),sizeof(DMG_ROM_HEADER))
+		Dump(VarPtr(header),sizeof(DMG_ROM_HEADER), DMG_HEADER_ADDRESS)
 
 		Dim info AS DMG_ROM_INFO,infostr AS BytePtr
 		DMG_rawHeaderToInfo(header,info)
@@ -49,17 +76,20 @@ Sub Main()
 		printf(infostr)	: free(infostr) : infostr=NULL
 
 		if info.bLogoCheck=FALSE Then
-			colorPrint(PH_ERROR, ex"[Warning] �ڐG�s��\n")
+			colorPrint(PH_ERROR, ex"[Warning] 接触不良¥n")
 		End If
 			
-		input ex"\n1.Dump ROM  2.Dump SRAM  5.GBMemory Dump  6.Write SRAM\n> ",c
+		input ex"¥n1.Dump ROM  2.Dump SRAM  5.GBMemory Dump  6.Write SRAM¥n> ",c
 
 		DMG_GetHeader(fe,VarPtr(header))
 		DMG_rawHeaderToInfo(header,info)
 		ft->flush()
 	
 		if c=1 Then
-			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
+			Dim savefilename AS BytePtr
+			savefilename=MakeFileName(info.Title,"",".gb")
+			DumpFullRomToFile(fe,savefilename,info)
+			free(savefilename) : savefilename=NULL
 		Elseif c=2 Then
 			DumpSramToFile(fe,sprintfStr("%s.sav",info.Title),info)
 		Elseif c=6 Then
@@ -68,9 +98,9 @@ Sub Main()
 		else if c=5 Then			
 			printf("GB Memory Setup: ")
 			if GBMC_MapEntire(fe) = TRUE Then
-				printf(ex"successful\n")
+				printf(ex"successful¥n")
 			Else
-				printf(ex"failed\n")
+				printf(ex"failed¥n")
 			End If
 
 			info.RomSize=1024*1024
@@ -80,10 +110,10 @@ Sub Main()
 		else if c=3 Then
 			'MBC2 SRAM READ TEST
 			ft->flush()
-			fe->ROMEnable(TRUE)
+			fe->ROMEnable(FALSE)
 			Dim buf[512] AS byte
 
-			'sanni�̓�C���@-> ���ʂȂ�
+			'sanniの謎修正　-> 効果なし
 			FT232H_ReadEPROM(fe,buf,&H0134,4,TRUE)
 
 			MBC_RamEnable(fe,DMG_MBC2,TRUE)
@@ -99,10 +129,45 @@ Sub Main()
 			test.openFile("mbc2.sav",GENERIC_WRITE)
 			test.write(buf,512)
 			test.close() 
+
+		Else if c=100 then
+			' https://gbdev.gg8.se/forums/viewtopic.php?id=469
+			ft->flush()
+'			fe->ROMEnable(FALSE)
+			fe->ROMEnable(TRUE)
+			
+
+			FT232H_ReadEPROM(fe,buf,&HA000,16,TRUE)
+			Dump(buf,16)
+
+			MBC_RegisterWrite(fe, &HA001, &H0A) 'TAMA5 unlock
+'			fe->FT_SendCommands()
+
+			FT232H_ReadEPROM(fe,buf,&HA000,16,TRUE)
+			Dump(buf,16)
+			fe->FT_SendCommands()
+
+			MBC_RegisterWrite(fe, &HA001, &H00) 'ROM BANK LOW
+			MBC_RegisterWrite(fe, &HA000, &H00) ' DATA
+			MBC_RegisterWrite(fe, &HA001, &H01) 'ROM BANK HIGH
+			MBC_RegisterWrite(fe, &HA000, &H00) ' DATA
+
+			fe->ROMEnable(FALSE)
+			FT232H_ReadEPROM(fe,buf,&H0100,128,FALSE)
+			Dump(buf,128)
+
+			DMG_ReadCart(fe, buf, &H0100,128, FALSE)
+			Dump(buf,128)
+			FT232H_ReadEPROM(fe,buf,&H0100,128,FALSE)
+			Dump(buf,128)
+			
+			fe->ROMEnable(TRUE)
+			fe->FT_SendCommands()
+
 		End If
 		ft->flush()
 
-		printf(ex"\n\n")
+		printf(ex"¥n¥n")
 		
 		if c<>0 Then Input "[PRESS ENTER]",c
 	Loop
@@ -114,7 +179,7 @@ End Sub
 Function CheckCancel() AS BOOL
 	if GetKeyState(VK_ESCAPE) And &H80 Then 
 		CheckCancel=TRUE
-		printf(ex"\n>>>>>>> Cancelled by user.\n\n")
+		printf(ex"¥n>>>>>>> Cancelled by user.¥n¥n")
 	Else
 		CheckCancel=FALSE
 	End If

@@ -12,8 +12,8 @@ Const MBC_ADR_ROM_BANK_NUMBER_HIBYTE = &H3000
 Type Align(1) DMG_ROM_HEADER 
 	EntryPoint AS DWord	'0100h
 	NLogo[47] AS Byte	'0104h
-	Title[14] AS Byte	'0134h
-	GBCFlag AS Byte		'0143h
+	Title[15] AS Byte	'0134h
+'	GBCFlag AS Byte		'0143h
 	MakerCode AS Word	'0144h
 	SGBFlag AS Byte		'146
 	CartType AS Byte		
@@ -26,17 +26,18 @@ Type Align(1) DMG_ROM_HEADER
 	CheckSum AS Word
 End Type
 
-'Header‚ğ‚í‚©‚è‚â‚·‚­‚µ‚½“z
+'Headerã‚’ã‚ã‹ã‚Šã‚„ã™ãã—ãŸå¥´
 Type DMG_ROM_INFO
 	raw AS DMG_ROM_HEADER
 	bLogoCheck AS BOOL
-	Title[15] AS Byte
-	GameCode[4] AS Byte	'•¶š—ñˆµ‚¢(NullI’[)
+	Title[16] AS Byte
+	GameCode[4] AS Byte	'æ–‡å­—åˆ—æ‰±ã„(Nullçµ‚ç«¯)
 	ConsoleFlag AS Long
 	MBCType AS DMG_MBC_TYPE
 	RomSize AS DWord
 	SramSize AS DWord
 	RomVersion As DWord
+	hasGameCode As Byte
 End Type
 
 Const DMG_NLOGO_SUM = &H1546
@@ -101,17 +102,17 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 	lt=GetTickCount()
 	buf=RomDumpFull(fe,VarPtr(info))
 	lt=GetTickCount() - lt
-	printf(ex"\nProcess Time : %dms %ds\n",lt,lt/1000)
+	printf(ex"Â¥nProcess Time : %dms %dsÂ¥n",lt,lt/1000)
 
 	Dim actualSum As DWord
 	actualSum = DMG_CalcSum(buf,info.RomSize)
-	printf(ex"Checksum: \n [Actual] 0x%04X\n [Header] 0x%04X ... ",actualSum,info.raw.CheckSum)
+	printf(ex"Checksum: Â¥n [Actual] 0x%04XÂ¥n [Header] 0x%04X ... ",actualSum,info.raw.CheckSum)
 	if actualSum = info.raw.CheckSum Then
-		colorPrint(PH_SUCCESS, ex"[ OK ]\n")
+		colorPrint(PH_SUCCESS, ex"[ OK ]Â¥n")
 	Else
-		colorPrint(PH_ERROR, ex"[ NG ]\n")
+		colorPrint(PH_ERROR, ex"[ NG ]Â¥n")
 		if info.MBCType=DMG_GMMC1 And retry=0 Then 
-			printf(ex"NP RETRY...\n\n")
+			printf(ex"NP RETRY...Â¥nÂ¥n")
 			retry++
 			Goto *DFRTF_DUMP_START
 		End If
@@ -119,9 +120,12 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 
 
 	Dim fout AS File
-	fout.openFile(filename,GENERIC_WRITE)
-	fout.write(buf,info.RomSize)
-	fout.close()
+	if fout.openFile(filename,GENERIC_WRITE)=TRUE Then
+		fout.write(buf,info.RomSize)
+		fout.close()
+	Else
+		printf("File Write Error!")
+	End If
 
 	free(buf): buf=NULL
 
@@ -131,7 +135,7 @@ Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS D
 
 	Dim fout AS File
 	if fout.openFile(filename,GENERIC_WRITE)=FALSE Then
-		printf(ex"File open error : %s\n",filename)
+		printf(ex"File open error : %sÂ¥n",filename)
 		exitfunction
 	End If
 
@@ -157,7 +161,7 @@ Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS 
 	Dim buf AS BytePtr
 	Dim fout AS File
 	if fout.openFile(filename,GENERIC_READ)=FALSE Then
-		printf(ex"File open error : %s\n",filename)
+		printf(ex"File open error : %sÂ¥n",filename)
 		exitfunction
 	End If
 
@@ -183,29 +187,31 @@ End Function
 
 Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	dim bRD_Pulse AS BOOL
-	if info->MBCType= DMG_GMMC1 Then	bRD_Pulse=TRUE:printf(ex"[NintendoPower] RD Pulse Enabled\n")
+	if info->MBCType= DMG_GMMC1 Then	bRD_Pulse=TRUE:printf(ex"[NintendoPower] RD Pulse EnabledÂ¥n")
 
 	Dim buf AS BytePtr
 	buf = calloc(info->RomSize)
 
 	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE,bRD_Pulse)
 	
-	printf(ex"\n")
+	printf(ex"Â¥n")
 
 	dim i AS Long,bankCount As Long,lt AS DWord
 	bankCount=info->RomSize / DMG_BANK_SIZE -1
 	lt=GetTickCount()
 	For i=1 To bankCount
-		printf(ex"[DumpROM] Bank:%02X/%02X %d%% ::: %dkb/s         \r",i,bankCount,i/bankCount*100, ((i*DMG_BANK_SIZE)/(GetTickCount()-lt)) As DWord)
+		printf(ex"[DumpROM] Bank:%02X/%02X %d%% ::: %dkb/s         Â¥r",i,bankCount,i/bankCount*100, ((i*DMG_BANK_SIZE)/(GetTickCount()-lt)) As DWord)
 
 		MBC_RomBankSet(fe,info->MBCType,i)
 		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse)
+		printf(ex"bank=%d Â¥n",i)
+		Dump(buf + i*DMG_BANK_SIZE,16,i*DMG_BANK_SIZE)
 
 		if CheckCancel() Then ExitFor
 	Next
 	RomDumpFull=buf
 	
-	printf(ex"\n")
+	printf(ex"Â¥n")
 End Function
 
 Const DMG_SRAM_BANK_SIZE = &H2000
@@ -220,12 +226,12 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 
 	MBC_RamEnable(fe,info->MBCType,TRUE)
 
-	printf(ex"\n")
+	printf(ex"Â¥n")
 
 	dim i AS Long,bankCount As Long
 	bankCount=Abs(info->SramSize / DMG_SRAM_BANK_SIZE-1)
 	For i=0 To bankCount
-		printf(ex"[DumpSRAM] Bank:%02X/%02X %d%%  \r",i,bankCount,i/bankCount*100)
+		printf(ex"[DumpSRAM] Bank:%02X/%02X %d%%  Â¥r",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
 		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE,TRUE)
 
@@ -240,18 +246,18 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 
 	SramDumpFull=buf
 
-	printf(ex"\n")
+	printf(ex"Â¥n")
 End Function
 
 Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 	MBC_RamEnable(fe,info->MBCType,TRUE)
 
-	printf(ex"\n")
+	printf(ex"Â¥n")
 
 	dim i AS Long,bankCount As Long
 	bankCount=Abs(info->SramSize / DMG_SRAM_BANK_SIZE-1)
 	For i=0 To bankCount
-		printf(ex"[WriteSRAM] Bank:%02X/%02X %d%%   \r",i,bankCount,i/bankCount*100)
+		printf(ex"[WriteSRAM] Bank:%02X/%02X %d%%   Â¥r",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
 		DMG_WriteCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE)
 
@@ -260,7 +266,7 @@ Function SramWrite(fe As *FT232H_DMGROM, buf AS BytePtr,info AS *DMG_ROM_INFO)
 
 	MBC_RamEnable(fe,info->MBCType,FALSE)
 
-	printf(ex"\n")
+	printf(ex"Â¥n")
 	
 End Function
 
@@ -268,7 +274,7 @@ End Function
 ' Memory Bank Controller util
 '-----------------------------
 
-'4000h-7FFFh‚ÌROMƒoƒ“ƒN‚ğƒZƒbƒg‚·‚é
+'4000h-7FFFhã®ROMãƒãƒ³ã‚¯ã‚’ã‚»ãƒƒãƒˆã™ã‚‹
 Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 
 	if mbc=DMG_MBC2 or mbc=DMG_GMMC1 Then
@@ -286,7 +292,7 @@ Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 End Sub
 
 
-'A000h-BFFFh‚ÌSRAMƒoƒ“ƒN‚ğƒZƒbƒg‚·‚é
+'A000h-BFFFhã®SRAMãƒãƒ³ã‚¯ã‚’ã‚»ãƒƒãƒˆã™ã‚‹
 Sub MBC_SramBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 	if mbc<>DMG_MBC2 Then
 		MBC_RegisterWrite(fe, MBC_ADR_SRAM_BANK_NUMBER, bankNum)
@@ -328,7 +334,7 @@ End Sub
 
 
 
-'Ql
+'å‚è€ƒ
 'https://github.com/n13i/writeboy/blob/master/WriteBoy/cart_type.ino
 'https://forums.nesdev.com/viewtopic.php?f=12&t=11453&start=147
 Function GBMC_MapEntire(fe AS *FT232H_DMGROM) AS BOOL
@@ -338,7 +344,7 @@ Function GBMC_MapEntire(fe AS *FT232H_DMGROM) AS BOOL
 	GBMC_RegisterWrite(fe, &H0122, &H55)
 	GBMC_RegisterWrite(fe, &H013f, &Ha5)
 
-	'05h = Map "MENU PROGRAM", 04h = ƒJƒZƒbƒg‘S‘Ì‚ğƒ}ƒbƒv
+	'05h = Map "MENU PROGRAM", 04h = ã‚«ã‚»ãƒƒãƒˆå…¨ä½“ã‚’ãƒãƒƒãƒ—
 	GBMC_RegisterWrite(fe, &H0120, &H04)
 	GBMC_RegisterWrite(fe, &H013f, &Ha5)
 /*
@@ -363,15 +369,15 @@ End Function
 ' ROM HEADER UTILs
 '-----------------------
 
-'GB‚ÌROMƒwƒbƒ_æ“¾
+'GBã®ROMãƒ˜ãƒƒãƒ€å–å¾—
 Sub DMG_GetHeader(fe As *FT232H_DMGROM,header AS *DMG_ROM_HEADER)
-	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER))
+	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), FALSE)
 End Sub
 
-'¶‚Ìheader‚©‚çinfo‚ğì¬
+'ç”Ÿã®headerã‹ã‚‰infoã‚’ä½œæˆ
 Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_INFO)
 	memcpy(VarPtr(info),VarPtr(rawHeader),sizeof(DMG_ROM_HEADER))
-
+	
 	Dim i AS Long,sum AS DWord
 	For i=0 To 47
 		sum+=rawHeader.NLogo[i]
@@ -383,20 +389,47 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 		info.bLogoCheck=FALSE
 	End If
 
-	memcpy(info.Title,rawHeader.Title,15)
-	info.Title[15]=0
+	info.hasGameCode = FALSE
 
-	'ƒ^ƒCƒgƒ‹‚ª16•¶š‚æ‚è­‚È‚¢ê‡AƒQ[ƒ€ID‚ªƒ^ƒCƒgƒ‹‚ÌŒã‚ë‚Ì•û‚É‘‚©‚ê‚Ä‚¢‚é‚±‚Æ‚ª‚ ‚éB
-	if info.Title[10]=&H00 or info.Title[10]=&H20 Then _
-		memcpy(info.GameCode,VarPtr(info.Title[11]),4)
+	memcpy(info.Title,rawHeader.Title,16)
+	info.Title[16]=0
 
-	If rawHeader.GBCFlag = &HC0 Then
-		info.ConsoleFlag = DMG_CF_GBC	'GBCê—p
+	If rawHeader.Title[15] = &HC0 Then
+		info.ConsoleFlag = DMG_CF_GBC	'GBCå°‚ç”¨
+		info.hasGameCode = TRUE
 	Else
 		info.ConsoleFlag = DMG_CF_NGB
-		if rawHeader.GBCFlag = &H80 Then	info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_GBC
-		if rawHeader.SGBFlag <> &H00 Then	info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_SGB
+		if rawHeader.Title[15] AND &H80 Then
+			info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_GBC
+			info.hasGameCode = TRUE
+		End If
+		if rawHeader.SGBFlag <> &H00 Then
+			info.ConsoleFlag = info.ConsoleFlag Or DMG_CF_SGB
+		End If
 	Endif
+	
+	'ã‚¿ã‚¤ãƒˆãƒ«ãŒ16æ–‡å­—ã‚ˆã‚Šå°‘ãªã„å ´åˆã€ã‚²ãƒ¼ãƒ IDãŒã‚¿ã‚¤ãƒˆãƒ«ã®å¾Œã‚ã®æ–¹ã«æ›¸ã‹ã‚Œã¦ã„ã‚‹ã“ã¨ãŒã‚ã‚‹ã€‚
+/*	if info.Title[10]=&H00 or info.Title[10]=&H20 Then 		
+		info.hasGameCode = TRUE
+	End If*/
+	for i=0 to 3
+		Dim cbyte As Byte
+		cbyte = info.Title[11+i]
+		if (cbyte < GetByte("A")) OR (cbyte > GetByte("Z")) then
+			if (cbyte < GetByte("0")) OR (cbyte > GetByte("9")) then
+				info.hasGameCode = FALSE
+				exitfor
+			endif
+		End If
+	Next
+
+	'ã“ã‚Œã§ã‚‚ã™ã‚ŠæŠœã‘ã‚‹ã‚ˆã†ãªã‚‰ã€GameIDæœ«å°¾ã®å›½ã‚³ãƒ¼ãƒ‰J E P Uãªã©ã‚’é ¼ã‚‹
+
+	if info.hasGameCode then
+		memcpy(info.GameCode,VarPtr(info.Title[11]),4)
+		info.GameCode[4] = 0
+		info.Title[11] = 0
+	End If
 
 	Dim ct AS Byte, mt AS DMG_MBC_TYPE
 	ct=rawHeader.CartType
@@ -446,7 +479,7 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	End If
 
 	info.MBCType=mt
-'	printf(ex"%02X ::: %s\n",ct,DMG_MBC_TYPE_STR[mt])
+'	printf(ex"%02X ::: %sÂ¥n",ct,DMG_MBC_TYPE_STR[mt])
 
 	'54h ::: (50h --> 8Mbit) + (04h --> 4Mbit) = 12Mbit = 1.5MB
 	info.RomSize = (&H8000 << (rawHeader.RomSize And &H0F))
@@ -461,7 +494,7 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 		&H02000, 	'02h 8KB
 		&H08000, 	'03h 32KB
 		&H20000, 	'04h 128KB
-		&H10000		'05h 64KB	'‚È‚ñ‚Å‚â‚Ë‚ñ
+		&H10000		'05h 64KB	'ãªã‚“ã§ã‚„ã­ã‚“
 	] AS Long 
 
 	if info.MBCType = DMG_MBC2 Then
@@ -475,19 +508,28 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 		info.RomVersion = info.RomVersion - &H30
 	End If
 	
-
+	Dim title_len As Long
+	title_len = lstrlen(info.Title)
+	for i=title_len To 0 Step -1
+		printf(ex"'%s'Â¥n",info.Title)
+		if info.Title[i] < GetByte("0") then
+			info.Title[i] = 0
+		Else
+			exitfor
+		End If
+	Next
 End Sub
 
 Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 	Dim str AS StringClass
 	str.allocStr(1024)
-	str.cpy(ex"DMG ROM Infomation:\n")
+	str.cpy(ex"DMG ROM Infomation:Â¥n")
 
-	str.sprintf(ex"  Title    : %s\n", info.Title)
+	str.sprintf(ex"  Title    : %sÂ¥n", info.Title)
 
-	if info.GameCode[0]<>0 Then str.sprintf(ex"  GameID   : %s\n",info.GameCode)
+	if info.GameCode[0]<>0 Then str.sprintf(ex"  GameID   : %sÂ¥n",info.GameCode)
 
-	str.sprintf(ex"  MBC      : %s [%02X]\n  RomSize  : %d KB\n  SramSize : %d KB\n  Version  : 1.%d\n  CheckSum : %04X\n", _
+	str.sprintf(ex"  MBC      : %s [%02Xh]Â¥n  RomSize  : %d KBÂ¥n  SramSize : %d KBÂ¥n  Version  : 1.%dÂ¥n  CheckSum : %04XÂ¥n  Console  : ", _
 		DMG_MBC_TYPE_STR[info.MBCType],info.raw.CartType, _
 		info.RomSize/1024, _ 
 		info.SramSize/1024, _ 
@@ -495,11 +537,19 @@ Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 		info.raw.CheckSum _
 		)
 
-	str.cat(ex"  Contact  : ")
-	if info.bLogoCheck=FALSE then 
-		str.cat(ex"ÚG•s—Ç [Contact Failue]\n")
+	if info.ConsoleFlag = DMG_CF_GBC Then 
+		str.cat("GBC only ")
 	Else
-		str.cat(ex"OK\n")
+		if info.ConsoleFlag And DMG_CF_NGB Then str.cat("NGB ")
+		if info.ConsoleFlag And DMG_CF_SGB Then str.cat("SGB ")
+		if info.ConsoleFlag And DMG_CF_GBC Then str.cat("GBC ")
+	Endif
+
+	str.cat(ex"Â¥n  Contact  : ")
+	if info.bLogoCheck=FALSE then 
+		str.cat(ex"æ¥è§¦ä¸è‰¯ [Contact Failue]Â¥n")
+	Else
+		str.cat(ex"OKÂ¥n")
 	End If
 
 
@@ -507,7 +557,7 @@ Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 	str.copyToNewPtr(DMG_GenerateInfoText)
 End Function
 
-'Global ChecksumŒvZ
+'Global Checksumè¨ˆç®—
 Function DMG_CalcSum(rom AS BytePtr,Length AS Long) As Word
 	Dim i AS Long
 	Dim actualSum=0 AS Word,tmp AS Word
@@ -516,7 +566,7 @@ Function DMG_CalcSum(rom AS BytePtr,Length AS Long) As Word
 		actualSum += rom[i]
 	Next i
 
-	'GlobalChecksum‚ÍŒvZ‚©‚çœŠO
+	'GlobalChecksumã¯è¨ˆç®—ã‹ã‚‰é™¤å¤–
 	actualSum -= rom[&H014E] 
 	actualSum -= rom[&H014F] 
 

@@ -21,13 +21,14 @@ Protected
 	bRomEnalbe AS BOOL
 	bReadEnable AS BOOL
 	bWriteEnable AS BOOL
+
 Public
 	Sub init(ftc AS *FT232H)
 		ft=ftc
 
 		ft->gpio->setACBusDir(&HFF)
 		ft->gpio->setADBusDir(&HF0)
-		mcp=new FT232H_MCP23017(ft,3,40)
+		mcp=new FT232H_MCP23017(ft,3,60)
 
 		mcp->SetPort(&H0000,&H0000)
 		SetLatch(0)
@@ -72,7 +73,7 @@ Public
 	End Sub
 
 	Sub SetAddress(adr AS DWord)(forceLatch As BOOL)
-		'•ÏX‚Ì•K—v‚ª‚ ‚é‚¾‚¯LATCH 
+		'å¤‰æ›´ã®å¿…è¦ãŒã‚ã‚‹æ™‚ã ã‘LATCH 
 		if (adr xor Address) >> 16 or forceLatch Then
 			SetLatch(adr>>16)
 		End If
@@ -98,6 +99,7 @@ Public
 	Sub AreaReadRequest(adr AS DWord,length As DWord)(bRD_pulse AS BOOL)
 		Dim i aS DWord
 		SetDatabusDirection(FTE_INPUT)
+		bRD_pulse=TRUE
 
 		if bRD_pulse Then 
 			ReadEnable(FALSE)
@@ -110,10 +112,12 @@ Public
 			SetAddress(adr+i)
 			if bRD_pulse Then ReadEnable(TRUE)
 	
-			'ft->addCommand(ex"\x9c\x03\x00",3)				'Wait 13us •Ê‚É‚È‚­‚Ä‚à‚¢‚¢‚±‚Æ‚ª”»–¾
+	'		ft->addCommand(ex"Â¥x9cÂ¥x03Â¥x00",3)				'Wait 13us åˆ¥ã«ãªãã¦ã‚‚ã„ã„ã“ã¨ãŒåˆ¤æ˜
+			ft->addCommand(ex"Â¥x8FÂ¥x01Â¥x00",3)				'Wait 13us åˆ¥ã«ãªãã¦ã‚‚ã„ã„ã“ã¨ãŒåˆ¤æ˜
 			ft->gpio->ACBusReadRequest()
-	
-			if bRD_pulse Then ReadEnable(FALSE)				'ŠmÀ‚É‚¢‚é
+	'		ft->addCommand(ex"Â¥x9cÂ¥x03Â¥x00",3)				'Wait 13us åˆ¥ã«ãªãã¦ã‚‚ã„ã„ã“ã¨ãŒåˆ¤æ˜
+			
+			if bRD_pulse Then ReadEnable(FALSE)				'ç¢ºå®Ÿã«ã„ã‚‹
 			i++
 			if length<=i Then ExitDo
 
@@ -147,7 +151,7 @@ protected
 	Sub SetLatch(val AS Byte)
 		ft->gpio->setADBusBit(FT_EPROM_RST_PIN,1)		'LATCH START
 		mcp->SetPortValA(val)							'LATCH SET
-		ft->addCommand(ex"\x9c\x39\x00",3)				'Wait 13us
+		ft->addCommand(ex"Â¥x9cÂ¥x39Â¥x00",3)				'Wait 13us
 		mcp->SetPortValA(val)							'LATCH SET
 		ft->gpio->setADBusBit(FT_EPROM_RST_PIN,0)		'LATCH HOLD
 	End Sub
@@ -182,11 +186,11 @@ Public
 			if i Mod &H10=0 Then ft->sendCommands()
 		Next i
 		
-		'ft->addCommand(ex"\x9c\xa0\x00",3)	'wait 55us 0x0080
+		'ft->addCommand(ex"Â¥x9cÂ¥xa0Â¥x00",3)	'wait 55us 0x0080
 
-		AreaWirte=TRUE '–ß‚è’lFOK
+		AreaWirte=TRUE 'æˆ»ã‚Šå€¤ï¼šOK
 
-		'‘‚«‚İƒ`ƒFƒbƒN
+		'æ›¸ãè¾¼ã¿ãƒã‚§ãƒƒã‚¯
 		checkBuf = calloc(length+5)
 		AreaReadRequest(adr,length)
 		ft->sendCommands()
@@ -194,7 +198,7 @@ Public
 
 		For i=0 To length-1
 			if buffer[i] <> checkBuf[i] Then
-				AreaWirte=FALSE	'–ß‚è’l:NG
+				AreaWirte=FALSE	'æˆ»ã‚Šå€¤:NG
 				ExitFor
 			End If
 		Next i
@@ -202,31 +206,33 @@ Public
 		free(checkBuf)
 	End Function
 	
-	'‚±‚Ìƒ‹[ƒ`ƒ“‚É‚ÍˆêØ‚Ìƒ€ƒ_‚ª‚È‚¢‚Ì‚Å‚¢‚¶‚ç‚È‚¢‚±‚Æi20190905Œ»‚´‚¤j
+	'ã“ã®ãƒ«ãƒ¼ãƒãƒ³ã«ã¯ä¸€åˆ‡ã®ãƒ ãƒ€ãŒãªã„ã®ã§ã„ã˜ã‚‰ãªã„ã“ã¨ï¼ˆ20190905ç¾ã–ã†ï¼‰
 	Sub WriteByte(data AS Byte)
 		ReadEnable(FALSE)
 
 		'PROGRAM
-'		ft->addCommand(ex"\x9c\x09\x00",3)	'Wait 
+'		ft->addCommand(ex"Â¥x9cÂ¥x09Â¥x00",3)	'Wait 
 		
 		SetData(data)	'SET WRITE DATA
-	'	ft->addCommand(ex"\x9c\x20\x00",3)	'Wait
+	'	ft->addCommand(ex"Â¥x9cÂ¥x20Â¥x00",3)	'Wait
 
 		WriteEnable(TRUE)
-		ft->addCommand(ex"\x9c\xf0\x00",3)	'wait 55us
+		ft->addCommand(ex"Â¥x9cÂ¥xf0Â¥x00",3)	'wait 55us
 
 		WriteEnable(FALSE)
 
 		ReadEnable(TRUE)
 		'wait 4us
-'		ft->addCommand(ex"\x9c\x20\x00",3)	'wait
+'		ft->addCommand(ex"Â¥x9cÂ¥x20Â¥x00",3)	'wait
 
 '		ReadEnable(TRUE)
-		SetData(&HFF)'Ÿ‚Ìƒf[ƒ^‚ÅŒë‚ç‚È‚¢‚æ‚¤‚É	[•K—v]
+	'1	SetData(&HFF)'æ¬¡ã®ãƒ‡ãƒ¼ã‚¿ã§èª¤ã‚‰ãªã„ã‚ˆã†ã«	[å¿…è¦]
+	 
+'		ft->gpio->setACBus(&HFF)
 
 '		SetDatabusDirection(FTE_INPUT)
 '		ReadEnable(TRUE)
-'		ft->addCommand(ex"\x9c\x09\x00",3)
+'		ft->addCommand(ex"Â¥x9cÂ¥x09Â¥x00",3)
 	End Sub
 	
 Private

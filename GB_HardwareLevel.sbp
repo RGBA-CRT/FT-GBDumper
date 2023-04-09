@@ -1,7 +1,7 @@
 
 
-'GB‚ÌƒJ[ƒgƒŠƒbƒWƒAƒNƒZƒX
-Const FTE_READ_PACKET_SIZE = 1024*16
+'GBã®ã‚«ãƒ¼ãƒˆãƒªãƒƒã‚¸ã‚¢ã‚¯ã‚»ã‚¹
+Const FTE_READ_PACKET_SIZE = 1024*2
 Const FTE_WRITE_PACKET_SIZE = 1024*16
 Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL) AS BOOL
 	Dim readCount AS Long, lastReadSize AS Long
@@ -15,7 +15,7 @@ Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, L
 		if i => readCount Then ExitDo
 
 		readOffset = i*FTE_READ_PACKET_SIZE
-'		printf(ex"READ %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,FTE_READ_PACKET_SIZE)
+'		printf(ex"READ %02X:%04X +%04XÂ¥n",readOffset>>16,readOffset And &HFFFF,FTE_READ_PACKET_SIZE)
 		
 		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_READ_PACKET_SIZE, bRD_Pulse)
 
@@ -24,7 +24,7 @@ Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, L
 
 	if lastReadSize > 0 Then
 		readOffset = i*FTE_READ_PACKET_SIZE
-'		printf(ex"Last %02X:%04X +%04X\n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
+'		printf(ex"Last %02X:%04X +%04XÂ¥n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
 		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize , bRD_Pulse)
 	End If
 	fe->ROMEnable(FALSE)
@@ -44,7 +44,7 @@ Function DMG_WriteCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, 
 		if i => WriteCount Then ExitDo
 
 		WriteOffset = i*FTE_WRITE_PACKET_SIZE
-'		printf(ex"Write %02X:%04X +%04X\n",WriteOffset>>16,WriteOffset And &HFFFF,FTE_WRITE_PACKET_SIZE)
+'		printf(ex"Write %02X:%04X +%04XÂ¥n",WriteOffset>>16,WriteOffset And &HFFFF,FTE_WRITE_PACKET_SIZE)
 		fe->AreaWirte(Address+WriteOffset, buffer+WriteOffset, FTE_WRITE_PACKET_SIZE)
 
 		i++
@@ -59,7 +59,7 @@ Function DMG_WriteCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, 
 	DMG_WriteCart=TRUE
 End Function
 
-'[’áƒŒƒCƒ„‚È“]‘—] ‚P‰ñ‚Ì“]‘—
+'[ä½Žãƒ¬ã‚¤ãƒ¤ãªè»¢é€] ï¼‘å›žã®è»¢é€
 Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL) As BOOL
 	fe->AreaReadRequest(Address,Length,bRD_Pulse)
 	fe->FT_SendCommands()
@@ -67,7 +67,7 @@ Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWor
 
 End Function
 
-'1ƒoƒCƒgRead
+'1ãƒã‚¤ãƒˆRead
 Function FT232H_ReadByte(fe AS *FT232H_DMGROM,Address AS DWord) As Byte
 	fe->ReadDataRequest()
 	fe->FT_SendCommands()
@@ -95,7 +95,7 @@ Sub flush(hFT AS HANDLE)
 	
 	ftStatus = ftStatus or FT_GetQueueStatus(hFT, bufsize)		 ' Get the number of bytes in the FT2232H receive buffer
 	buf=calloc(bufsize)
-	if bufsize>0 then printf(ex"[flush] %d bytes\n", bufsize)
+	if bufsize>0 then printf(ex"[flush] %d bytesÂ¥n", bufsize)
 
 	if (ftStatus = FT_OK) And  (bufsize > 0) Then _
 		FT_Read(hFT, buf, bufsize, dwAB)  'Read out the data from FT2232H receive buffer
