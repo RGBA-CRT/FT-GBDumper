@@ -38,6 +38,7 @@ Type DMG_ROM_INFO
 	SramSize AS DWord
 	RomVersion As DWord
 	hasGameCode As Byte
+	special AS Long
 End Type
 
 Const DMG_NLOGO_SUM = &H1546
@@ -86,6 +87,10 @@ Dim DMG_MBC_TYPE_STR[DMG_MBC_TYPE_MAX+1] = [
 	"MBC Unknown"
 ] AS BytePtr
 
+Enum SPECIAL_MODE
+	SPECIAL_DISABLE_CHECKSUM = 1
+End Enum
+
 Const MBC_ADR_SRAM_BANK_NUMBER = &H4000
 Const MBC_ADR_SRAM_ENABLE = &H0000
 Const MBC1_ADR_MODE_SELECT = &H6000
@@ -98,6 +103,7 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 
 	Dim buf AS BytePtr,lt As DWord, retry AS DWord
 
+	drop_count=0
 *DFRTF_DUMP_START
 	lt=GetTickCount()
 	buf=RomDumpFull(fe,VarPtr(info))
@@ -111,7 +117,7 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 		colorPrint(PH_SUCCESS, ex"[ OK ]¥n")
 	Else
 		colorPrint(PH_ERROR, ex"[ NG ]¥n")
-		if info.MBCType=DMG_GMMC1 And retry=0 Then 
+		if info.MBCType=DMG_GMMC1 And retry<>2 And (info.special And SPECIAL_DISABLE_CHECKSUM)=0 Then 
 			printf(ex"NP RETRY...¥n¥n")
 			retry++
 			Goto *DFRTF_DUMP_START
@@ -186,13 +192,17 @@ End Function
 '-------------------------
 
 Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
-	dim bRD_Pulse AS BOOL
-	if info->MBCType= DMG_GMMC1 Then	bRD_Pulse=TRUE:printf(ex"[NintendoPower] RD Pulse Enabled¥n")
+	dim bRD_Pulse AS BOOL, deepRead As BOOL
+	if info->MBCType= DMG_GMMC1 Then
+		bRD_Pulse=TRUE
+		deepRead=TRUE
+		printf(ex"[GBMC] RD-Palse and Deep-Read Enabled¥n")
+	endif
 
 	Dim buf AS BytePtr
 	buf = calloc(info->RomSize)
 
-	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE,bRD_Pulse)
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE,bRD_Pulse, deepRead)
 	
 	printf(ex"¥n")
 
@@ -203,9 +213,11 @@ Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 		printf(ex"[DumpROM] Bank:%02X/%02X %d%% ::: %dkb/s         ¥r",i,bankCount,i/bankCount*100, ((i*DMG_BANK_SIZE)/(GetTickCount()-lt)) As DWord)
 
 		MBC_RomBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse)
-		printf(ex"bank=%d ¥n",i)
-		Dump(buf + i*DMG_BANK_SIZE,16,i*DMG_BANK_SIZE)
+		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse, deepRead)
+		if deepRead then
+			printf(ex"bank=%d ¥n",i)
+			Dump(buf + i*DMG_BANK_SIZE,16,i*DMG_BANK_SIZE)
+		endif
 
 		if CheckCancel() Then ExitFor
 	Next
@@ -277,6 +289,7 @@ End Function
 '4000h-7FFFhのROMバンクをセットする
 Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 
+'	fe->ROMEnable(TRUE)
 	if mbc=DMG_MBC2 or mbc=DMG_GMMC1 Then
 		MBC_RegisterWrite(fe, &H2100, bankNum)
 	Else
@@ -289,6 +302,7 @@ Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER_HIBYTE, (bankNum>>8))
 '		printf("[MBC5 HIBYTE SET][%x]",bankNum>>8)
 	Endif
+'	fe->ROMEnable(FALSE)
 End Sub
 
 
@@ -371,7 +385,7 @@ End Function
 
 'GBのROMヘッダ取得
 Sub DMG_GetHeader(fe As *FT232H_DMGROM,header AS *DMG_ROM_HEADER)
-	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), FALSE)
+	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), TRUE)
 End Sub
 
 '生のheaderからinfoを作成

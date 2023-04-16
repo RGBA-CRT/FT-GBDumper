@@ -62,10 +62,11 @@ Public
 
 	Sub ReadEnable(ef AS BOOL)
 		if bReadEnable <> ef Then
-			ft->gpio->setADBusBit(FT_EPROM_READ_ENABLE_PIN,not(ef) AND &H01)
 			if ef=TRUE Then
 				SetDatabusDirection(FTE_INPUT)
+				ft->gpio->setADBusBit(FT_EPROM_READ_ENABLE_PIN,not(ef) AND &H01)
 			Else
+				ft->gpio->setADBusBit(FT_EPROM_READ_ENABLE_PIN,not(ef) AND &H01)
 				SetDatabusDirection(FTE_OUTPUT)
 			End If
 			bReadEnable=ef
@@ -78,7 +79,11 @@ Public
 			SetLatch(adr>>16)
 		End If
 
-		mcp->SetPortValWord(adr AS Word)
+		if (((adr xor Address) >> 8) And &HFF) or forceLatch Then
+			mcp->SetPortValWord(adr AS Word)
+		Else
+			mcp->SetPortValA(adr AS Word)
+		End If
 
 		Address=adr
 	End Sub
@@ -96,26 +101,40 @@ Public
 		ReadEnable(FALSE)
 	End Sub
 
-	Sub AreaReadRequest(adr AS DWord,length As DWord)(bRD_pulse AS BOOL)
+	Sub AreaReadRequest(adr AS DWord,length As DWord)(bRD_pulse AS BOOL, deepRead AS BOOL)
 		Dim i aS DWord
 		SetDatabusDirection(FTE_INPUT)
-		bRD_pulse=TRUE
+	'	bRD_pulse=TRUE
 
 		if bRD_pulse Then 
 			ReadEnable(FALSE)
 		Else
 			ReadEnable(TRUE)
 		End If
+	'	ft->addCommand(ex"¥x8F¥x05¥x00",3)				'Wait 13us 別になくてもいいことが判明
 
 		Do
-
 			SetAddress(adr+i)
-			if bRD_pulse Then ReadEnable(TRUE)
+			if bRD_pulse Then 
+				ft->clockWithNoData(0)
+				ReadEnable(TRUE)
+				ft->clockWithNoData(7) '通常ROM
+'				ft->clockWithNoData(4) '通常ROM
+'				ft->clockWithNoData(15) 'NP安定
+				' 0=8clock = 133.3ns
+			endif
 	
-	'		ft->addCommand(ex"¥x9c¥x03¥x00",3)				'Wait 13us 別になくてもいいことが判明
-			ft->addCommand(ex"¥x8F¥x01¥x00",3)				'Wait 13us 別になくてもいいことが判明
 			ft->gpio->ACBusReadRequest()
-	'		ft->addCommand(ex"¥x9c¥x03¥x00",3)				'Wait 13us 別になくてもいいことが判明
+			if deepRead Then
+				ft->clockWithNoData(15)
+				ft->gpio->ACBusReadRequest()
+				ft->clockWithNoData(15)
+				ft->gpio->ACBusReadRequest()
+				ft->clockWithNoData(15)
+				ft->gpio->ACBusReadRequest()
+				ft->clockWithNoData(15)
+				ft->gpio->ACBusReadRequest()
+			Endif
 			
 			if bRD_pulse Then ReadEnable(FALSE)				'確実にいる
 			i++
@@ -126,10 +145,11 @@ Public
 
 	Sub WriteEnable(ef AS BOOL)
 		if bWriteEnable <> ef Then
-			ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,not(ef) AND &H01)
 			if ef=FALSE Then
 				SetDatabusDirection(FTE_INPUT)
+				ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,not(ef) AND &H01)
 			Else
+				ft->gpio->setADBusBit(FT_EPROM_VPP_PIN,not(ef) AND &H01)
 				SetDatabusDirection(FTE_OUTPUT)
 			End If
 			bWriteEnable=ef
@@ -186,7 +206,7 @@ Public
 			if i Mod &H10=0 Then ft->sendCommands()
 		Next i
 		
-		'ft->addCommand(ex"¥x9c¥xa0¥x00",3)	'wait 55us 0x0080
+		ft->addCommand(ex"¥x9c¥xa0¥x00",3)	'wait 55us 0x0080
 
 		AreaWirte=TRUE '戻り値：OK
 
@@ -209,30 +229,13 @@ Public
 	'このルーチンには一切のムダがないのでいじらないこと（20190905現ざう）
 	Sub WriteByte(data AS Byte)
 		ReadEnable(FALSE)
-
-		'PROGRAM
-'		ft->addCommand(ex"¥x9c¥x09¥x00",3)	'Wait 
 		
 		SetData(data)	'SET WRITE DATA
-	'	ft->addCommand(ex"¥x9c¥x20¥x00",3)	'Wait
-
 		WriteEnable(TRUE)
-		ft->addCommand(ex"¥x9c¥xf0¥x00",3)	'wait 55us
+		ft->clockWithNoData(0)
 
 		WriteEnable(FALSE)
-
-		ReadEnable(TRUE)
-		'wait 4us
-'		ft->addCommand(ex"¥x9c¥x20¥x00",3)	'wait
-
-'		ReadEnable(TRUE)
-	'1	SetData(&HFF)'次のデータで誤らないように	[必要]
-	 
-'		ft->gpio->setACBus(&HFF)
-
-'		SetDatabusDirection(FTE_INPUT)
-'		ReadEnable(TRUE)
-'		ft->addCommand(ex"¥x9c¥x09¥x00",3)
+		ft->clockWithNoData(0)
 	End Sub
 	
 Private

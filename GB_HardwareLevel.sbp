@@ -3,13 +3,13 @@
 'GBのカートリッジアクセス
 Const FTE_READ_PACKET_SIZE = 1024*2
 Const FTE_WRITE_PACKET_SIZE = 1024*16
-Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL) AS BOOL
+Dim drop_count As DWord
+Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL, deepRead As BOOL) AS BOOL
 	Dim readCount AS Long, lastReadSize AS Long
 	readCount = Length / FTE_READ_PACKET_SIZE
 	lastReadSize = Length - readCount*FTE_READ_PACKET_SIZE
 
 	fe->ROMEnable(TRUE)
-	
 	Dim i As Long,readOffset AS DWord
 	Do
 		if i => readCount Then ExitDo
@@ -17,7 +17,7 @@ Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, L
 		readOffset = i*FTE_READ_PACKET_SIZE
 '		printf(ex"READ %02X:%04X +%04X¥n",readOffset>>16,readOffset And &HFFFF,FTE_READ_PACKET_SIZE)
 		
-		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_READ_PACKET_SIZE, bRD_Pulse)
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, FTE_READ_PACKET_SIZE, bRD_Pulse, deepRead)
 
 		i++
 	Loop
@@ -25,7 +25,7 @@ Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, L
 	if lastReadSize > 0 Then
 		readOffset = i*FTE_READ_PACKET_SIZE
 '		printf(ex"Last %02X:%04X +%04X¥n",readOffset>>16,readOffset And &HFFFF,lastReadSize)
-		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize , bRD_Pulse)
+		FT232H_ReadEPROM(fe, buffer + readOffset,Address + readOffset, lastReadSize , bRD_Pulse, deepRead)
 	End If
 	fe->ROMEnable(FALSE)
 	
@@ -59,12 +59,48 @@ Function DMG_WriteCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, 
 	DMG_WriteCart=TRUE
 End Function
 
-'[低レイヤな転送] １回の転送
-Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL) As BOOL
-	fe->AreaReadRequest(Address,Length,bRD_Pulse)
-	fe->FT_SendCommands()
-	FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
+Function winner(a As Byte, b As Byte, c As Byte) As Byte
+	winner = (a And b) Or (b And c) Or (a And c)
+End Function
 
+Function winner5(a As Byte, b As Byte, c As Byte, d As Byte, e As Byte) As Byte
+	winner5 = (a And b) Or (b And c) Or (a And c) Or (a And d) Or (b And d) Or (c And d) _
+	 Or (a And e) Or (b And e) Or (c And e) Or (d And e)
+End Function
+
+'[低レイヤな転送] １回の転送
+Function FT232H_ReadEPROM(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL, deepRead As BOOL) As BOOL
+	fe->AreaReadRequest(Address,Length,bRD_Pulse, deepRead)
+	fe->FT_SendCommands()
+
+	if deepRead=FALSE Then
+		FT232H_ReadEPROM = fe->FT_ReceiveData(buffer,Length)
+	Else
+	/*	Dim localbuf As BytePtr, ofs As DWord,i AS Long
+		localbuf = calloc(Length*3)
+		FT232H_ReadEPROM = fe->FT_ReceiveData(localbuf,Length*3)
+		for i=0 To Length-1
+			ofs=i*3
+			buffer[i] = winner(localbuf[ofs],localbuf[ofs+1],localbuf[ofs+2])
+			if localbuf[ofs]<>localbuf[ofs+1] OR localbuf[ofs+2]<>localbuf[ofs] OR localbuf[ofs+2]<>localbuf[ofs+1] then
+				printf(ex"filter: %08x:%02x = %02x %02x %02x¥n", Address+i, buffer[i], localbuf[ofs],localbuf[ofs+1],localbuf[ofs+2])
+			End If
+		Next
+		free(localbuf)
+	*/
+		Dim localbuf As BytePtr, ofs As DWord,i AS Long
+		localbuf = calloc(Length*5)
+		FT232H_ReadEPROM = fe->FT_ReceiveData(localbuf,Length*5)
+		for i=0 To Length-1
+			ofs=i*5
+			buffer[i] = winner5(localbuf[ofs],localbuf[ofs+1],localbuf[ofs+2],localbuf[ofs+3],localbuf[ofs+4])
+			if localbuf[ofs]<>buffer[i] OR localbuf[ofs+1]<>buffer[i] OR localbuf[ofs+2]<>buffer[i] OR localbuf[ofs+3]<>buffer[i] OR localbuf[ofs+4]<>buffer[i] then
+				drop_count++
+				printf(ex"filter: %08x:%02x = %02x %02x %02x %02x %02x cnt=%d¥n", Address+i, buffer[i], localbuf[ofs],localbuf[ofs+1],localbuf[ofs+2],localbuf[ofs+3],localbuf[ofs+4], drop_count)
+			End If
+		Next
+		free(localbuf)
+	endif
 End Function
 
 '1バイトRead

@@ -42,7 +42,7 @@ Function MakeFileName(filename As BytePtr, prefix AS BytePtr, extention AS ByteP
 	MakeFileName=calloc(p+1)
 	lstrcpy(MakeFileName,buffer)
 	free(buffer) : buffer=NULL
-
+' TODO ファイル名エスケープ、MakeRomFileNameを移植、GBC拡張子をつける
 End Function
 
 Sub Main()
@@ -105,7 +105,11 @@ Sub Main()
 
 			info.RomSize=1024*1024
 			info.MBCType=DMG_GMMC1
+			info.special = SPECIAL_DISABLE_CHECKSUM
+			
+			savefilename=MakeFileName(info.Title,"",".gb")
 			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
+			free(savefilename) : savefilename=NULL
 
 		else if c=3 Then
 			'MBC2 SRAM READ TEST
@@ -118,13 +122,14 @@ Sub Main()
 
 			MBC_RamEnable(fe,DMG_MBC2,TRUE)
 		
-			FT232H_ReadEPROM(fe,buf,&HA000,512,TRUE)
-			Dump(buf,128)
+			fe->ROMEnable(TRUE)
+			FT232H_ReadEPROM(fe,buf,&HA000,512,TRUE,TRUE)
+			Dump(buf,512)
 			fe->ROMEnable(TRUE)
 			MBC_RamEnable(fe,DMG_MBC2,FALSE)
 			fe->FT_SendCommands()
 			
-		'	DMG_MBC2_SRAM_4to8(buf)
+			DMG_MBC2_SRAM_4to8(buf)
 			Dim test AS File 
 			test.openFile("mbc2.sav",GENERIC_WRITE)
 			test.write(buf,512)
@@ -163,7 +168,10 @@ Sub Main()
 			
 			fe->ROMEnable(TRUE)
 			fe->FT_SendCommands()
-
+		Else if c=201 then
+			fe->WriteEnable(TRUE)
+		Else if c=202 then
+			fe->WriteEnable(FALSE)
 		End If
 		ft->flush()
 
