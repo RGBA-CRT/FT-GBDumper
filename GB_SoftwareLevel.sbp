@@ -182,8 +182,28 @@ Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS D
 
 End Function
 
+Sub VerifyData(src As BytePtr, verify As BytePtr, size AS DWord)
+	Dim i As DWord
+	Dim err As DWord
+	Dim err_start As DWord, err_end AS DWord
+	for i=0 to size
+		if src[i] <> verify[i] then
+			err++
+			if err_start=0 then err_start=i
+			err_end = i
+		End If
+	Next
+	if err = 0 then
+		Print "Verify ... OK"
+	Else
+		Dim err_rate As DWord
+		err_rate = (err*10000)/size 
+		printf(ex"Verify ... NG.¥n - Error range: %04xh-%04xh¥n - Error rate : %d/%d ::: %d.%02d%%¥n",_
+				err_start, err_end, err, size, err_rate/100, err_rate Mod 100)
+	End If
+End Sub
 
-Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
+Function WriteSramFromFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS DMG_ROM_INFO) AS BOOL
 
 	Dim buf AS BytePtr
 	Dim fout AS File
@@ -192,18 +212,24 @@ Function WriteSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS 
 		exitfunction
 	End If
 
+	Dim size AS DWord
+	size = info.SramSize 
 	if info.SramSize < DMG_SRAM_BANK_SIZE Then
-		buf=calloc(DMG_SRAM_BANK_SIZE)
-	Else
-		buf=calloc(info.SramSize)
+		size = DMG_SRAM_BANK_SIZE
 	End If
+	buf=calloc(size)
 
 	fout.read(buf,info.SramSize)
 	fout.close()
 
 	SramWrite(fe,buf,VarPtr(info))
 
+	Dim verify As BytePtr
+	verify=SramDumpFull(fe,VarPtr(info))
+	VerifyData(buf, verify, size)
+
 	free(buf): buf=NULL
+	free(verify): verify=NULL
 
 End Function
 

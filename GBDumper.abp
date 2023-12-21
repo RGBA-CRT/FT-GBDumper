@@ -71,7 +71,7 @@ Sub Main()
 			free(savefilename) : savefilename=NULL
 		Elseif c=6 Then
 			Input "FileName(.sav) > ",filename
-			WriteSramToFile(fe,filename,info)
+			WriteSramFromFile(fe,filename,info)
 		else if c=5 Then			
 			printf("GB Memory Setup: ")
 			if GBMC_MapEntire(fe) = TRUE Then
