@@ -18,32 +18,6 @@
 Const FT_COMMAND_BUFFER_SIZE = 700*1024 
 Main()
 
-Function MakeFileName(filename As BytePtr, prefix AS BytePtr, extention AS BytePtr) AS BytePtr
-	Dim buffer As BytePtr, i AS Long, p AS DWORD
-	buffer=calloc(MAX_PATH)
-	
-	if prefix<>NULL Then
-		pstrcat(buffer,prefix,p)
-	endif
-
-	pstrcat(buffer,filename,p)
-	
-
-	if extention<>NULL Then
-		pstrcat(buffer,extention,p)
-	endif
-
-	'ファイル名に使えない文字を削除(とりあえず日本語非対応)
-	For i=0 to p-1	
-		if buffer[i] < &H20 Then
-			buffer[i] = GetByte(" ")
-		End If
-	Next i
-	MakeFileName=calloc(p+1)
-	lstrcpy(MakeFileName,buffer)
-	free(buffer) : buffer=NULL
-' TODO ファイル名エスケープ、MakeRomFileNameを移植、GBC拡張子をつける
-End Function
 
 Sub Main()
 
@@ -85,13 +59,16 @@ Sub Main()
 		DMG_rawHeaderToInfo(header,info)
 		ft->flush()
 	
-		if c=1 Then
+		if c=1 or c=101 Then
+			if c=101 then info.isNeedDeepRead = TRUE
 			Dim savefilename AS BytePtr
-			savefilename=MakeFileName(info.Title,"",".gb")
+			savefilename=MakeFileName(VarPtr(info),"",DMG_FILE_ROM)
 			DumpFullRomToFile(fe,savefilename,info)
 			free(savefilename) : savefilename=NULL
 		Elseif c=2 Then
-			DumpSramToFile(fe,sprintfStr("%s.sav",info.Title),info)
+			savefilename=MakeFileName(VarPtr(info),"",DMG_FILE_SAVE)
+			DumpSramToFile(fe,savefilename,info)
+			free(savefilename) : savefilename=NULL
 		Elseif c=6 Then
 			Input "FileName(.sav) > ",filename
 			WriteSramToFile(fe,filename,info)
@@ -106,8 +83,9 @@ Sub Main()
 			info.RomSize=1024*1024
 			info.MBCType=DMG_GMMC1
 			info.special = SPECIAL_DISABLE_CHECKSUM
+			info.isNeedDeepRead = TRUE
 			
-			savefilename=MakeFileName(info.Title,"",".gb")
+			savefilename=MakeFileName(VarPtr(info),"",DMG_FILE_ROM)
 			DumpFullRomToFile(fe,sprintfStr("%s.gb",info.Title),info)
 			free(savefilename) : savefilename=NULL
 
@@ -172,6 +150,12 @@ Sub Main()
 			fe->WriteEnable(TRUE)
 		Else if c=202 then
 			fe->WriteEnable(FALSE)
+		Else if c=222 then
+			
+			fe->ROMEnable(TRUE)
+			FT232H_ReadEPROM(fe,buf,&H0600,512,TRUE,TRUE)
+			Dump(buf,512,&H0600)
+			fe->ROMEnable(TRUE)
 		End If
 		ft->flush()
 

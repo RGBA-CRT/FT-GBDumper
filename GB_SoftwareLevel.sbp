@@ -32,13 +32,16 @@ Type DMG_ROM_INFO
 	bLogoCheck AS BOOL
 	Title[16] AS Byte
 	GameCode[4] AS Byte	'文字列扱い(Null終端)
+	ConsoleCode[4] AS Byte	' DMG or CGB 文字列扱い(Null終端)
 	ConsoleFlag AS Long
 	MBCType AS DMG_MBC_TYPE
 	RomSize AS DWord
 	SramSize AS DWord
 	RomVersion As DWord
+	Region As DMG_COUNTRY
 	hasGameCode As Byte
 	special AS Long
+	isNeedDeepRead AS BOOL
 End Type
 
 Const DMG_NLOGO_SUM = &H1546
@@ -91,6 +94,24 @@ Enum SPECIAL_MODE
 	SPECIAL_DISABLE_CHECKSUM = 1
 End Enum
 
+Enum DMG_COUNTRY
+	DMG_COUNTRY_JAPAN = 0
+	DMG_COUNTRY_USA
+	DMG_COUNTRY_EUROPE
+	DMG_COUNTRY_INTERNATIONAL
+	DMG_COUNTRY__NUM
+	DMG_COUNTRY_UNKNOWN
+End Enum
+
+' ↑のラベル
+Dim DMG_COUNTRY_LABEL[DMG_COUNTRY__NUM*2+2] = [
+	"J",	"Japan"			,
+	"E",	"USA"			,
+	"P",	"Europe"		,
+	"I",	"World" ,
+	"?",	"Unknown"	
+] AS BytePtr
+
 Const MBC_ADR_SRAM_BANK_NUMBER = &H4000
 Const MBC_ADR_SRAM_ENABLE = &H0000
 Const MBC1_ADR_MODE_SELECT = &H6000
@@ -117,7 +138,7 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 		colorPrint(PH_SUCCESS, ex"[ OK ]¥n")
 	Else
 		colorPrint(PH_ERROR, ex"[ NG ]¥n")
-		if info.MBCType=DMG_GMMC1 And retry<>2 And (info.special And SPECIAL_DISABLE_CHECKSUM)=0 Then 
+		if info.isNeedDeepRead And (retry<>2)  Then 
 			printf(ex"NP RETRY...¥n¥n")
 			retry++
 			Goto *DFRTF_DUMP_START
@@ -130,7 +151,7 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 		fout.write(buf,info.RomSize)
 		fout.close()
 	Else
-		printf("File Write Error!")
+		printf(EX"File Write Error! path:¥q%s¥q GLE=%d¥n", filename,GetLastError())
 	End If
 
 	free(buf): buf=NULL
@@ -193,7 +214,7 @@ End Function
 
 Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	dim bRD_Pulse AS BOOL, deepRead As BOOL
-	if info->MBCType= DMG_GMMC1 Then
+	if info->MBCType= DMG_GMMC1 or info->isNeedDeepRead Then
 		bRD_Pulse=TRUE
 		deepRead=TRUE
 		printf(ex"[GBMC] RD-Palse and Deep-Read Enabled¥n")
@@ -383,10 +404,77 @@ End Function
 ' ROM HEADER UTILs
 '-----------------------
 
+Function DMG_GetCountryString(country_code AS Byte) As BytePtr
+	if country_code >= DMG_COUNTRY__NUM Then country_code = DMG_COUNTRY__NUM
+	DMG_GetCountryString = DMG_COUNTRY_LABEL[country_code*2+1]
+End Function
+
+Function DMG_GetCountryCodeString(country_code AS Byte) As BytePtr
+	if country_code >= DMG_COUNTRY__NUM Then country_code = DMG_COUNTRY__NUM
+	DMG_GetCountryCodeString = DMG_COUNTRY_LABEL[country_code*2]
+End Function
+
+Function DMG_GetRegionId(letter As Byte) As DMG_COUNTRY
+	Dim i As Long
+	DMG_GetRegionId = DMG_COUNTRY_UNKNOWN
+	for i = 0 to DMG_COUNTRY__NUM
+		if letter = DMG_COUNTRY_LABEL[i*2][0] then
+			SetDWord(VarPtr(DMG_GetRegionId), i)
+			exitfor
+		endif
+	Next
+End Function
+
+Function DMG_SloveRegion(ByRef info As DMG_ROM_INFO) As DMG_COUNTRY
+	Dim ret = DMG_COUNTRY__NUM As DMG_COUNTRY
+	if info.hasGameCode Then
+		ret = DMG_GetRegionId(info.GameCode[3])
+	Else
+		if info.raw.RegionCode = 0 Then
+			ret = DMG_COUNTRY_JAPAN
+		else
+			ret = DMG_COUNTRY_INTERNATIONAL
+		endif
+	endif
+	DMG_SloveRegion = ret
+End Function
+
 'GBのROMヘッダ取得
 Sub DMG_GetHeader(fe As *FT232H_DMGROM,header AS *DMG_ROM_HEADER)
 	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), TRUE)
 End Sub
+
+Function IsGameCodeLetter(letter AS Byte) As BOOL
+	IsGameCodeLetter=TRUE
+	if (letter < GetByte("A")) OR (letter > GetByte("Z")) then
+		if (letter < GetByte("0")) OR (letter > GetByte("9")) then
+			IsGameCodeLetter = FALSE
+		endif
+	End If
+End Function
+
+Function IsExtendedGameIdLetter(code AS *Byte) As BOOL
+	' A: 4桁拡張ゲームIDのバンクA
+	' B: 4桁拡張ゲームIDのバンクB
+	' C: 無いと思われる
+	' V: 振動カートリッジ
+	' H: ポケットファミリー2　（ハドソン製造ということ？）
+	' K: コロコロカービィ
+	' P: ポケットカメラ
+	' M: GBメモリ
+	Dim extended_sign="ABVHKP" As BytePtr
+	Dim i=0 AS Long
+	Do
+		if extended_sign[i] = code[0] Then
+			IsExtendedGameIdLetter=TRUE
+			ExitFunction
+		elseif extended_sign[i] = 0 Then
+			ExitDo
+		End If
+		i++
+	Loop
+	IsExtendedGameIdLetter=FALSE
+End Function
 
 '生のheaderからinfoを作成
 Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_INFO)
@@ -426,7 +514,20 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 /*	if info.Title[10]=&H00 or info.Title[10]=&H20 Then 		
 		info.hasGameCode = TRUE
 	End If*/
-	for i=0 to 3
+	if IsExtendedGameIdLetter(VarPtr(info.Title[11])) Then
+		if DMG_GetRegionId(info.Title[11+3]) <> DMG_COUNTRY_UNKNOWN Then
+			if (IsGameCodeLetter(info.Title[11+1]) OR IsGameCodeLetter(info.Title[11+2])) = 0 then
+				info.hasGameCode = FALSE
+			End If
+		Else
+			info.hasGameCode = FALSE
+		End If
+	Else
+		if win_strncmp(info.Title+11, "MENU", 4) = FALSE then
+			info.hasGameCode = FALSE
+		End If
+	End If
+/*	for i=0 to 3
 		Dim cbyte As Byte
 		cbyte = info.Title[11+i]
 		if (cbyte < GetByte("A")) OR (cbyte > GetByte("Z")) then
@@ -436,6 +537,9 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 			endif
 		End If
 	Next
+*/
+	' 11byte目以降IDあり：カラー系ゲーム
+	' 11byte目以降はあるがIDなし：ポヨンのダンジョンルーム
 
 	'これでもすり抜けるようなら、GameID末尾の国コードJ E P Uなどを頼る
 
@@ -443,8 +547,13 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 		memcpy(info.GameCode,VarPtr(info.Title[11]),4)
 		info.GameCode[4] = 0
 		info.Title[11] = 0
+		if info.ConsoleFlag = DMG_CF_GBC then
+			lstrcpy(info.ConsoleCode, "CGB") ' Color Only
+		Else
+			lstrcpy(info.ConsoleCode, "DMG")
+		End If
 	End If
-
+	
 	Dim ct AS Byte, mt AS DMG_MBC_TYPE
 	ct=rawHeader.CartType
 
@@ -460,7 +569,7 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	Elseif ct >= &H0B And ct<=&H0D Then
 		mt=DMG_MMM01
 
-	Elseif ct >= &H0F And ct<=&H012 Then
+	Elseif ct >= &H0F And ct<=&H013 Then
 		mt=DMG_MBC3
 
 	Elseif ct >= &H19 And ct<=&H1E Then
@@ -518,20 +627,24 @@ Sub DMG_rawHeaderToInfo(ByRef rawHeader AS DMG_ROM_HEADER,ByRef info As DMG_ROM_
 	End If
 
 	info.RomVersion = rawHeader.RomVersion
-	if info.RomVersion >= &H30 Then
+	if rawHeader.RomVersion >= &H30 Then
 		info.RomVersion = info.RomVersion - &H30
 	End If
+	info.RomVersion = info.RomVersion + 10 '0を1.0扱いする
 	
 	Dim title_len As Long
 	title_len = lstrlen(info.Title)
 	for i=title_len To 0 Step -1
-		printf(ex"'%s'¥n",info.Title)
-		if info.Title[i] < GetByte("0") then
+	'	printf(ex"'%s'¥n",info.Title)
+		if (info.Title[i] < GetByte("0")) or (info.Title[i] > &H7f) then
 			info.Title[i] = 0
 		Else
 			exitfor
 		End If
 	Next
+	
+	info.isNeedDeepRead=FALSE
+	info.Region = DMG_SloveRegion(info)
 End Sub
 
 Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
@@ -541,13 +654,14 @@ Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 
 	str.sprintf(ex"  Title    : %s¥n", info.Title)
 
-	if info.GameCode[0]<>0 Then str.sprintf(ex"  GameID   : %s¥n",info.GameCode)
+	if info.hasGameCode Then str.sprintf(ex"  GameID   : %s-%s¥n",info.ConsoleCode,info.GameCode)
 
-	str.sprintf(ex"  MBC      : %s [%02Xh]¥n  RomSize  : %d KB¥n  SramSize : %d KB¥n  Version  : 1.%d¥n  CheckSum : %04X¥n  Console  : ", _
+	str.sprintf(ex"  MBC      : %s [%02Xh]¥n  RomSize  : %d KB¥n  SramSize : %d KB¥n  Region   : %s¥n  Version  : %d.%d¥n  CheckSum : %04X¥n  Console  : ", _
 		DMG_MBC_TYPE_STR[info.MBCType],info.raw.CartType, _
 		info.RomSize/1024, _ 
 		info.SramSize/1024, _ 
-		info.RomVersion, _
+		DMG_GetCountryString(info.Region), _
+		info.RomVersion/10, info.RomVersion Mod 10, _
 		info.raw.CheckSum _
 		)
 
@@ -565,10 +679,69 @@ Function DMG_GenerateInfoText(ByRef info AS DMG_ROM_INFO) AS BytePtr
 	Else
 		str.cat(ex"OK¥n")
 	End If
-
-
+#ifdef _DEBUG
+	str.cat(MakeFileName(VarPtr(info),"debug: ",DMG_FILE_ROM))
+#endif
 	DMG_GenerateInfoText=calloc(str.length())
 	str.copyToNewPtr(DMG_GenerateInfoText)
+End Function
+
+enum DMG_FILE_TYPE
+	DMG_FILE_ROM
+	DMG_FILE_SAVE
+End Enum
+
+Function MakeFileName(info As *DMG_ROM_INFO, prefix AS BytePtr, name_type AS DMG_FILE_TYPE) AS BytePtr
+	Dim buffer As BytePtr, i AS Long, p AS DWORD
+	buffer=calloc(MAX_PATH)
+	
+	if prefix<>NULL Then
+		pstrcat(buffer,prefix,p)
+	endif
+
+	pstrcat(buffer,info->Title,p)
+	
+	'右からスペースをNULL文字で埋めル(GBは基本的にnull terminateされているので大丈夫のハズ
+	For i = p To 0 Step -1
+		If (buffer[i] <> &H20) And (buffer[i] <> 0) Then	exitfor
+		buffer[i] = 0
+	Next i
+	p=lstrlen(buffer)
+
+	'ファイル名に使えない文字を削除(とりあえず日本語非対応)
+	For i=0 to p-1	
+		if buffer[i] < &H20 Then
+			buffer[i] = GetByte(" ")
+		End If
+	Next i
+
+	Dim sgb AS BytePtr
+	if info->ConsoleFlag And DMG_CF_SGB then
+		sgb = "(SGB Enhanced)"
+	Else
+		sgb = ""
+	endif
+
+	p+=wsprintf(buffer+p, " (%s)(V%d.%d)%s", _
+				DMG_GetCountryString(info->Region), _
+				info->RomVersion / 10, info->RomVersion Mod 10,_
+				sgb)
+
+	if name_type=DMG_FILE_ROM Then
+		if info->ConsoleFlag = DMG_CF_GBC Then 
+			pstrcat(buffer,".gbc",p)
+		else
+			pstrcat(buffer,".gb",p)
+		End If
+	Else
+		pstrcat(buffer,".sav",p)
+	endif
+	EscapeForFilePath(buffer)
+
+	MakeFileName=calloc(p+1)
+	lstrcpy(MakeFileName,buffer)
+	free(buffer) : buffer=NULL
+' TODO ファイル名エスケープ、MakeRomFileNameを移植、GBC拡張子をつける
 End Function
 
 'Global Checksum計算

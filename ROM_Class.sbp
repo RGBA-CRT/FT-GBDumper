@@ -115,14 +115,13 @@ Public
 
 		Do
 			SetAddress(adr+i)
-			if bRD_pulse Then 
-				ft->clockWithNoData(0)
+			if bRD_pulse Then 	ft->clockWithNoData(0)
 				ReadEnable(TRUE)
-				ft->clockWithNoData(7) '通常ROM
+				if bRD_pulse Then  ft->clockWithNoData(7) '通常ROM
 '				ft->clockWithNoData(4) '通常ROM
 '				ft->clockWithNoData(15) 'NP安定
 				' 0=8clock = 133.3ns
-			endif
+'			endif
 	
 			ft->gpio->ACBusReadRequest()
 			if deepRead Then
@@ -135,8 +134,9 @@ Public
 				ft->clockWithNoData(15)
 				ft->gpio->ACBusReadRequest()
 			Endif
-			
-			if bRD_pulse Then ReadEnable(FALSE)				'確実にいる
+				ReadEnable(FALSE)
+				'202205 遊戯王でRE Pulseが常に必要なことを確認。RdPluseはウェイトの挿入に使用数量に変更
+
 			i++
 			if length<=i Then ExitDo
 
