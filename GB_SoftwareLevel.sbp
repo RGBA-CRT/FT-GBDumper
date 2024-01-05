@@ -133,7 +133,7 @@ Function DumpFullRomToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info A
 
 	Dim actualSum As DWord
 	actualSum = DMG_CalcSum(buf,info.RomSize)
-	printf(ex"Checksum: ¥n [Actual] 0x%04X¥n [Header] 0x%04X ... ",actualSum,info.raw.CheckSum)
+	printf(ex"Checksum: ¥n [Header] 0x%04X¥n [Actual] 0x%04X ... ",info.raw.CheckSum, actualSum)
 	if actualSum = info.raw.CheckSum Then
 		colorPrint(PH_SUCCESS, ex"[ OK ]¥n")
 	Else
@@ -177,6 +177,8 @@ Function DumpSramToFile(fe AS *FT232H_DMGROM,filename AS BytePtr,ByRef info AS D
 	fout.write(buf,info.SramSize)
 	fout.close()
 
+	Dump(buf, 16*6)
+
 	free(buf): buf=NULL
 	DumpSramToFile=TRUE
 
@@ -186,10 +188,18 @@ Sub VerifyData(src As BytePtr, verify As BytePtr, size AS DWord)
 	Dim i As DWord
 	Dim err As DWord
 	Dim err_start As DWord, err_end AS DWord
-	for i=0 to size
+
+	for i=0 to size-1
 		if src[i] <> verify[i] then
 			err++
-			if err_start=0 then err_start=i
+			if err_start=0 then 
+				err_start=i
+				Dim dispAdr As Long
+				dispAdr = (i And &HFFFFFFF0) -16
+				if dispAdr < 0 then dispAdr = 0
+				Dump(src + dispAdr, 48, dispAdr)
+				Dump(verify + dispAdr, 48, dispAdr)
+			endif
 			err_end = i
 		End If
 	Next

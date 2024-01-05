@@ -75,9 +75,10 @@ Public
 
 	Sub SetAddress(adr AS DWord)(forceLatch As BOOL)
 		'変更の必要がある時だけLATCH 
-		if (adr xor Address) >> 16 or forceLatch Then
+	/*	if (adr xor Address) >> 16 or forceLatch Then
 			SetLatch(adr>>16)
 		End If
+*/
 
 		if (((adr xor Address) >> 8) And &HFF) or forceLatch Then
 			mcp->SetPortValWord(adr AS Word)
@@ -104,24 +105,23 @@ Public
 	Sub AreaReadRequest(adr AS DWord,length As DWord)(bRD_pulse AS BOOL, deepRead AS BOOL)
 		Dim i aS DWord
 		SetDatabusDirection(FTE_INPUT)
-	'	bRD_pulse=TRUE
-
-		if bRD_pulse Then 
-			ReadEnable(FALSE)
-		Else
-			ReadEnable(TRUE)
-		End If
-	'	ft->addCommand(ex"¥x8F¥x05¥x00",3)				'Wait 13us 別になくてもいいことが判明
+'		ft->clockWithNoData(4) 
 
 		Do
 			SetAddress(adr+i)
-			if bRD_pulse Then 	ft->clockWithNoData(0)
-				ReadEnable(TRUE)
-				if bRD_pulse Then  ft->clockWithNoData(7) '通常ROM
-'				ft->clockWithNoData(4) '通常ROM
-'				ft->clockWithNoData(15) 'NP安定
-				' 0=8clock = 133.3ns
-'			endif
+
+			' アドレス伝搬待ち
+			' 20240104 DMG-BZOJでOEの下げ後のWAITが必要なことが判明
+			' 20240105 DMG-BZOJではACBusのドライブ電流を16mAから4mAに落としたらこのウェイトは不要なことがわかった
+'			ft->clockWithNoData(4) 
+
+			ReadEnable(TRUE)
+
+			' データ出力待ち
+			if bRD_pulse Then  ft->clockWithNoData(7) '通常ROM
+'			ft->clockWithNoData(4) '通常ROM
+'			ft->clockWithNoData(15) 'NP安定			
+			' 0=8clock = 133.3ns
 	
 			ft->gpio->ACBusReadRequest()
 			if deepRead Then
@@ -134,8 +134,10 @@ Public
 				ft->clockWithNoData(15)
 				ft->gpio->ACBusReadRequest()
 			Endif
-				ReadEnable(FALSE)
-				'202205 遊戯王でRE Pulseが常に必要なことを確認。RdPluseはウェイトの挿入に使用数量に変更
+
+			' Readパルス
+			' 202205 遊戯王でRE Pulseが常に必要なことを確認。RdPluseはウェイトの挿入に使用数量に変更
+			ReadEnable(FALSE)
 
 			i++
 			if length<=i Then ExitDo

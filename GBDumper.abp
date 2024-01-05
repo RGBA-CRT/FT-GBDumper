@@ -151,11 +151,13 @@ Sub Main()
 		Else if c=202 then
 			fe->WriteEnable(FALSE)
 		Else if c=222 then
-			
 			fe->ROMEnable(TRUE)
 			FT232H_ReadEPROM(fe,buf,&H0600,512,TRUE,TRUE)
 			Dump(buf,512,&H0600)
 			fe->ROMEnable(TRUE)
+		Else if c=234 then
+			ReadTest(fe)
+
 		End If
 		ft->flush()
 
@@ -177,5 +179,31 @@ Function CheckCancel() AS BOOL
 	End If
 End Function
 
+Sub TestRead(fe AS *FT232H_DMGROM, buf As BytePtr)
+'	fe->ROMEnable(TRUE)
+	MBC_RomBankSet(fe,DMG_MBC5,1)
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE*2,FALSE,FALSE)
+	
+	MBC_RomBankSet(fe,DMG_MBC5,2)
+	DMG_ReadCart(fe,buf+DMG_BANK_SIZE*2,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,TRUE,FALSE)
+	
+'	Dump(buf+&H100,80,DMG_ADDRESS_BANK0)
+	
+'	fe->ROMEnable(TRUE)
+End Sub
+
+Sub ReadTest(fe AS *FT232H_DMGROM)
+	Dim buf1 As BytePtr,buf2 As BytePtr
+	buf1 = calloc(DMG_BANK_SIZE*3)
+	buf2 = calloc(DMG_BANK_SIZE*3)
+	TestRead(fe, buf1)
+	Dim i As Long
+	For i=0 To 300
+		printf(ex"===============READ TEST %d=================¥n", i)
+		TestRead(fe, buf2)
+		VerifyData(buf1, buf2, DMG_BANK_SIZE*3)
+	Next
+	
+End Sub
 '-----------------------------------------------------------------------------------------
 
