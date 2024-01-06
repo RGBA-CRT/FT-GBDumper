@@ -248,6 +248,20 @@ End Function
 ' High Level Functions
 '-------------------------
 
+Function GetDumpAddress(info AS *DMG_ROM_INFO, bank As DWord) As DWord
+	if info->MBCType <> DMG_MMM01 Then
+		GetDumpAddress=DMG_ADDRESS_BANKn
+	Else
+		' MMM01
+		if bank And &H1F then
+			GetDumpAddress=DMG_ADDRESS_BANKn
+		Else
+			GetDumpAddress=DMG_ADDRESS_BANK0
+		End If
+		printf(ex"[MMM01] bnk=%02x addr=%04x¥n", bank, GetDumpAddress)
+	End If
+End Function
+
 Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	dim bRD_Pulse AS BOOL, deepRead As BOOL
 	if info->MBCType= DMG_GMMC1 or info->isNeedDeepRead Then
@@ -255,6 +269,9 @@ Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 		deepRead=TRUE
 		printf(ex"[GBMC] RD-Palse and Deep-Read Enabled¥n")
 	endif
+	if info->MBCType=DMG_MMM01 Then
+		MMM01_Init_RomMode(fe)
+	End If
 
 	Dim buf AS BytePtr
 	buf = calloc(info->RomSize)
@@ -270,7 +287,7 @@ Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 		printf(ex"[DumpROM] Bank:%02X/%02X %d%% ::: %dkb/s         ¥r",i,bankCount,i/bankCount*100, ((i*DMG_BANK_SIZE)/(GetTickCount()-lt)) As DWord)
 
 		MBC_RomBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,bRD_Pulse, deepRead)
+		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,GetDumpAddress(info, i),DMG_BANK_SIZE,bRD_Pulse, deepRead)
 		if deepRead then
 			printf(ex"bank=%d ¥n",i)
 			Dump(buf + i*DMG_BANK_SIZE,16,i*DMG_BANK_SIZE)
@@ -349,6 +366,8 @@ Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 '	fe->ROMEnable(TRUE)
 	if mbc=DMG_MBC2 or mbc=DMG_GMMC1 Then
 		MBC_RegisterWrite(fe, &H2100, bankNum)
+	Elseif mbc=DMG_MMM01 Then
+		MMM01_SwitchRomBank(fe, bankNum)
 	Else
 		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER, bankNum)
 	End If
@@ -435,7 +454,43 @@ Function GBMC_MapEntire(fe AS *FT232H_DMGROM) AS BOOL
 
 End Function
 
+Sub MMM01_Init_RomMode(fe As *FT232H_DMGROM)
+	/* Configuration 
+	 * RomBankLow = RomBankLow(2000h:4..0)
+	 * RomBankMid = RamBankLow(4000h:1..0)
+	 * RomBankHigh= not used (0 fixed)
+	 * RamBanking = Enable
+	 * RamBankLow = fixed bank 0 ( only 8KB, RomBankMidはMap中は変えられない )
+	 * Ram32KBが現れたら別モードを作る必要がある
+	 * Ram128KB,Rom4MBが現れたらRSTを制御する仕組みを作るか、カートリッジを抜き差ししてもらう 
+	 * ↑これだとRomBankLow=0, RomBankMid=1 */
 
+	' ROM Bank Register
+	MBC_RegisterWrite(fe, &H2000, 0) ' start bank
+
+	' RAM Bank Register
+	' RamBankLow=0, RamBankHigh=0, RomBankHigh=0, MBC1ModeWR=Enable(bit6)
+	MBC_RegisterWrite(fe, &H4000, &H00)
+	
+	' Mode Register
+	' Multiplex mode enable(40h), not rom mask, RAM Banking Enable(1h)
+	MBC_RegisterWrite(fe, &H6000, &H41)
+
+	' RAM Enable Register
+	' RAM Disable, no ram mask, mapping enable(40h)
+'	MBC_RegisterWrite(fe, &H0000, &H00)' 3A,7A
+	MBC_RegisterWrite(fe, &H0000, &H40)' 3A,7A
+End Sub
+
+Sub MMM01_SwitchRomBank(fe As *FT232H_DMGROM, bank AS DWord)
+	MBC_RegisterWrite(fe, &H2000, bank And &H1F) ' RomBankLow 5bit
+	MBC_RegisterWrite(fe, &H4000, &H40 OR (bank>>5) And &H3) ' RomBankHigh 2bit(RamBankLow)
+	if bank>>6 then
+		printf(ex"[Warning][MMM01] MMM01 RomBankHighBanking is not surpported.¥n")
+	End If
+	printf(ex"[MMM01] bank=%x, RomBankLow=%x RomBankMid=%x¥n",bank,bank And &H1F, (bank>>5) And &H3)
+
+End Sub
 '-----------------------
 ' ROM HEADER UTILs
 '-----------------------
