@@ -146,6 +146,14 @@ Sub Main()
 			
 			fe->ROMEnable(TRUE)
 			fe->FT_SendCommands()
+		Else if c=104 then
+			TAMA5_Init(fe)
+			TAMA5_WriteSramByteWithAddress(fe,0, &HDE)
+			TAMA5_WriteSramByteWithAddress(fe,1, &HAD)
+			Dim i AS Long
+			For i = 0 to 31
+				printf("%02X ",TAMA5_ReadSramByteWithAddress(fe,&H20+i))
+			Next
 		Else if c=201 then
 			fe->WriteEnable(TRUE)
 		Else if c=202 then
@@ -182,10 +190,10 @@ End Function
 Sub TestRead(fe AS *FT232H_DMGROM, buf As BytePtr)
 '	fe->ROMEnable(TRUE)
 	MBC_RomBankSet(fe,DMG_MBC5,1)
-	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE*2,FALSE,FALSE)
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE*2,0)
 	
 	MBC_RomBankSet(fe,DMG_MBC5,2)
-	DMG_ReadCart(fe,buf+DMG_BANK_SIZE*2,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,TRUE,FALSE)
+	DMG_ReadCart(fe,buf+DMG_BANK_SIZE*2,DMG_ADDRESS_BANKn,DMG_BANK_SIZE,DMG_ACCESS_RD_PULSE)
 	
 '	Dump(buf+&H100,80,DMG_ADDRESS_BANK0)
 	

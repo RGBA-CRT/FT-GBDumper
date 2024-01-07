@@ -1,15 +1,27 @@
-
+Const DMG_ACCESS_RD_PULSE  = &H01
+Const DMG_ACCESS_DEEP_READ = &H02
+Const DMG_ACCESS_NO_CS_PULSE=&H04
 
 'GBのカートリッジアクセス
 Const FTE_READ_PACKET_SIZE = 1024*2
 Const FTE_WRITE_PACKET_SIZE = 1024*16
 Dim drop_count As DWord
-Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord)(bRD_Pulse AS BOOL, deepRead As BOOL) AS BOOL
+
+Function DMG_ReadCart(fe AS *FT232H_DMGROM,buffer AS BytePtr,Address AS DWord, Length AS DWord, flags AS DWord) AS BOOL'(bRD_Pulse AS BOOL, deepRead As BOOL) AS BOOL
 	Dim readCount AS Long, lastReadSize AS Long
 	readCount = Length / FTE_READ_PACKET_SIZE
 	lastReadSize = Length - readCount*FTE_READ_PACKET_SIZE
 
-	fe->ROMEnable(TRUE)
+	Dim bRD_Pulse AS BOOL, deepRead As BOOL
+	bRD_Pulse = flags And DMG_ACCESS_RD_PULSE
+	deepRead = flags And DMG_ACCESS_DEEP_READ
+
+	if flags And DMG_ACCESS_NO_CS_PULSE then
+		fe->ROMEnable(FALSE)
+	Else
+		fe->ROMEnable(TRUE)
+	endif
+
 	Dim i As Long,readOffset AS DWord
 	Do
 		if i => readCount Then ExitDo

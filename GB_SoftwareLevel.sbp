@@ -263,20 +263,22 @@ Function GetDumpAddress(info AS *DMG_ROM_INFO, bank As DWord) As DWord
 End Function
 
 Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
-	dim bRD_Pulse AS BOOL, deepRead As BOOL
+	Dim flags=0 AS DWord
 	if info->MBCType= DMG_GMMC1 or info->isNeedDeepRead Then
-		bRD_Pulse=TRUE
-		deepRead=TRUE
+		flags OR= DMG_ACCESS_RD_PULSE OR DMG_ACCESS_DEEP_READ
 		printf(ex"[GBMC] RD-Palse and Deep-Read Enabled¥n")
 	endif
 	if info->MBCType=DMG_MMM01 Then
 		MMM01_Init_RomMode(fe)
 	End If
+	if info->MBCType=DMG_TAMA5 Then
+		flags OR= DMG_ACCESS_NO_CS_PULSE
+	End If
 
 	Dim buf AS BytePtr
 	buf = calloc(info->RomSize)
 
-	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE,bRD_Pulse, deepRead)
+	DMG_ReadCart(fe,buf,DMG_ADDRESS_BANK0,DMG_BANK_SIZE, flags)
 	
 	printf(ex"¥n")
 
@@ -287,8 +289,8 @@ Function RomDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 		printf(ex"[DumpROM] Bank:%02X/%02X %d%% ::: %dkb/s         ¥r",i,bankCount,i/bankCount*100, ((i*DMG_BANK_SIZE)/(GetTickCount()-lt)) As DWord)
 
 		MBC_RomBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,GetDumpAddress(info, i),DMG_BANK_SIZE,bRD_Pulse, deepRead)
-		if deepRead then
+		DMG_ReadCart(fe,buf + i*DMG_BANK_SIZE,GetDumpAddress(info, i),DMG_BANK_SIZE,flags)
+		if flags And DMG_ACCESS_DEEP_READ then
 			printf(ex"bank=%d ¥n",i)
 			Dump(buf + i*DMG_BANK_SIZE,16,i*DMG_BANK_SIZE)
 		endif
@@ -319,7 +321,7 @@ Function SramDumpFull(fe As *FT232H_DMGROM,info AS *DMG_ROM_INFO) As BytePtr
 	For i=0 To bankCount
 		printf(ex"[DumpSRAM] Bank:%02X/%02X %d%%  ¥r",i,bankCount,i/bankCount*100)
 		MBC_SramBankSet(fe,info->MBCType,i)
-		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE,TRUE)
+		DMG_ReadCart(fe,buf + i*DMG_SRAM_BANK_SIZE,DMG_SRAM_ADDRESS,DMG_SRAM_BANK_SIZE,DMG_ACCESS_RD_PULSE)
 
 		if CheckCancel() Then ExitFor
 	Next
@@ -368,6 +370,8 @@ Sub MBC_RomBankSet(fe As *FT232H_DMGROM, mbc AS Long, bankNum AS Long)
 		MBC_RegisterWrite(fe, &H2100, bankNum)
 	Elseif mbc=DMG_MMM01 Then
 		MMM01_SwitchRomBank(fe, bankNum)
+	elseif mbc=DMG_TAMA5 then
+		TAMA5_SwitchRomBank(fe, bankNum)
 	Else
 		MBC_RegisterWrite(fe, MBC_ADR_ROM_BANK_NUMBER, bankNum)
 	End If
@@ -463,7 +467,7 @@ Sub MMM01_Init_RomMode(fe As *FT232H_DMGROM)
 	 * RamBankLow = fixed bank 0 ( only 8KB, RomBankMidはMap中は変えられない )
 	 * Ram32KBが現れたら別モードを作る必要がある
 	 * Ram128KB,Rom4MBが現れたらRSTを制御する仕組みを作るか、カートリッジを抜き差ししてもらう 
-	 * ↑これだとRomBankLow=0, RomBankMid=1 */
+	 */
 
 	' ROM Bank Register
 	MBC_RegisterWrite(fe, &H2000, 0) ' start bank
@@ -491,6 +495,83 @@ Sub MMM01_SwitchRomBank(fe As *FT232H_DMGROM, bank AS DWord)
 	printf(ex"[MMM01] bank=%x, RomBankLow=%x RomBankMid=%x¥n",bank,bank And &H1F, (bank>>5) And &H3)
 
 End Sub
+
+Sub TAMA5_WaitRegister(fe AS *FT232H_DMGROM)
+	Dim buf[15] As Byte, i as Long
+	for i = 0 to 100
+		FT232H_ReadEPROM(fe,buf,&HA000,16,TRUE)
+		Dump(buf,16,&HA000)
+		if (buf[0] And &H3) = 1 then ExitSub
+	Next
+	Print "TAMA5 replay timeout."
+End Sub
+
+Sub TAMA5_Init(fe As *FT232H_DMGROM)
+	fe->ROMEnable(TRUE)
+	MBC_RegisterWrite(fe, &HA001, &H0A) 'TAMA5 unlock
+	TAMA5_WaitRegister(fe)
+	fe->ROMEnable(FALSE)
+End Sub
+
+Sub TAMA5_SwitchRomBank(fe As *FT232H_DMGROM, bank AS DWord)
+	if bank=0 then TAMA5_Init(fe)
+	fe->ROMEnable(TRUE)
+'	MBC_RegisterWrite(fe, &HA001, &H0A) 'TAMA5 unlock
+'	TAMA5_WaitRegister(fe)
+	
+	MBC_RegisterWrite(fe, &HA001, &H00) 'ROM BANK LOW
+	MBC_RegisterWrite(fe, &HA000, bank And &HF) ' DATA
+
+	MBC_RegisterWrite(fe, &HA001, &H01) 'ROM BANK HIGH
+	MBC_RegisterWrite(fe, &HA000, bank >> 4) ' DATA
+
+	fe->ROMEnable(FALSE)
+End Sub
+
+Sub TAMA5_SetSramAddress(fe As *FT232H_DMGROM, address AS DWord)
+	MBC_RegisterWrite(fe, &HA001, &H06) 'CMD=SAVE ADDRESS LOW
+	MBC_RegisterWrite(fe, &HA000, address And &HF) ' 
+
+	MBC_RegisterWrite(fe, &HA001, &H07) 'CMD=SAVE ADDRESS LOW
+	MBC_RegisterWrite(fe, &HA000, address >> 4) ' DATA
+End Sub
+
+Function TAMA5_ReadSramByte(fe As *FT232H_DMGROM) AS Byte
+	Dim u As Byte, l As Byte
+	MBC_RegisterWrite(fe, &HA001, &H0D)
+	u = FT232H_ReadByte(fe, &HA000) And &HF
+	MBC_RegisterWrite(fe, &HA001, &H0C)
+	l = FT232H_ReadByte(fe, &HA000) And &HF
+	TAMA5_ReadSramByte = (u << 4) OR l
+End Function
+
+Function TAMA5_WriteSramByte(fe As *FT232H_DMGROM, data As Byte) AS Byte
+	MBC_RegisterWrite(fe, &HA001, &H04)
+	MBC_RegisterWrite(fe, &HA000, data And &HF)
+	MBC_RegisterWrite(fe, &HA001, &H05)
+	MBC_RegisterWrite(fe, &HA000, data>>4)
+End Function
+
+Function TAMA5_ReadSramByteWithAddress(fe As *FT232H_DMGROM, addr AS DWord) AS Byte
+	fe->ROMEnable(TRUE)
+	
+	TAMA5_SetSramAddress(fe,addr)
+	TAMA5_WaitRegister(fe)
+	
+	TAMA5_ReadSramByteWithAddress = TAMA5_ReadSramByte(fe)
+
+	fe->ROMEnable(FALSE)
+End Function
+Function TAMA5_WriteSramByteWithAddress(fe As *FT232H_DMGROM, addr AS DWord, data AS Byte) AS Byte
+	fe->ROMEnable(TRUE)	
+	
+	TAMA5_WriteSramByte(fe,data)
+	TAMA5_WaitRegister(fe)
+
+	TAMA5_SetSramAddress(fe,addr)
+	fe->ROMEnable(FALSE)
+End Function
+
 '-----------------------
 ' ROM HEADER UTILs
 '-----------------------
@@ -530,9 +611,23 @@ Function DMG_SloveRegion(ByRef info As DMG_ROM_INFO) As DMG_COUNTRY
 	DMG_SloveRegion = ret
 End Function
 
+Function isFill(buf AS BytePtr, size AS DWord, c AS Byte) AS BOOL
+	dim i as Long
+	for i=0 to size-1
+		if buf[i] <> c then 
+			exitfunction
+		End If
+	Next
+	isFill = TRUE
+End Function
+
 'GBのROMヘッダ取得
 Sub DMG_GetHeader(fe As *FT232H_DMGROM,header AS *DMG_ROM_HEADER)
-	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), TRUE)
+	DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), DMG_ACCESS_RD_PULSE)
+	if isFill(header, sizeof(DMG_ROM_HEADER), &HFF) then
+'		printf(ex"FF fill detected¥n")
+		DMG_ReadCart(fe,header,DMG_HEADER_ADDRESS,sizeof(DMG_ROM_HEADER), DMG_ACCESS_RD_PULSE OR DMG_ACCESS_NO_CS_PULSE)	
+	End If
 End Sub
 
 Function IsGameCodeLetter(letter AS Byte) As BOOL
